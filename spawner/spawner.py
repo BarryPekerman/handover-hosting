@@ -31,6 +31,8 @@ PORT_BASE   = int(os.environ.get("TTYD_PORT_BASE", "8100"))
 LOGIN_USER  = os.environ.get("LOGIN_USER", "level0")
 COOKIE      = "hid"
 STATE_FILE  = os.environ.get("STATE_FILE", os.path.expanduser("~/.handover-sessions.json"))
+RATE_MAX    = int(os.environ.get("RATE_MAX", "5"))       # new containers per IP ...
+RATE_WINDOW = int(os.environ.get("RATE_WINDOW", "600"))  # ... per this many seconds
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("spawner")
@@ -39,6 +41,25 @@ log = logging.getLogger("spawner")
 sessions: dict[str, dict] = {}
 locks: dict[str, asyncio.Lock] = {}      # per-sid provisioning lock
 states: dict[str, str] = {}              # sid -> "pending"|"full"|"error" (ready == in sessions)
+ip_hits: dict[str, list] = {}            # client IP -> recent provision timestamps (throttle)
+
+
+def client_ip(request) -> str:
+    # behind Cloudflare the real client is in CF-Connecting-IP; fall back sanely
+    return (request.headers.get("CF-Connecting-IP")
+            or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or request.remote or "?")
+
+
+def throttled(ip: str) -> bool:
+    """True if this IP has started too many containers lately (records a hit if not)."""
+    now = time.time()
+    q = ip_hits.setdefault(ip, [])
+    q[:] = [t for t in q if now - t < RATE_WINDOW]
+    if len(q) >= RATE_MAX:
+        return True
+    q.append(now)
+    return False
 
 
 async def run(*args) -> tuple[int, str]:
@@ -159,8 +180,9 @@ LANDING = """<!doctype html><html><head><meta charset=utf-8>
 :root{color-scheme:dark}
 body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;
 justify-content:center;background:#000;color:#33ff66;font-family:monospace;text-align:center}
-a.play{margin-top:2rem;padding:.8rem 2.2rem;border:1px solid #33ff66;color:#33ff66;
-text-decoration:none;font-size:1.2rem}a.play:hover{background:#33ff66;color:#000}
+.play{margin-top:2rem;padding:.8rem 2.2rem;border:1px solid #33ff66;color:#33ff66;
+background:none;font-family:monospace;font-size:1.2rem;cursor:pointer}
+.play:hover{background:#33ff66;color:#000}
 p{max-width:34rem;line-height:1.5;padding:0 1rem}
 </style></head><body>
 <h1>THE HANDOVER</h1>
@@ -168,13 +190,20 @@ p{max-width:34rem;line-height:1.5;padding:0 1rem}
 A browser terminal is all you need. Type <code>mail</code> to start.</p>
 <p style="opacity:.75;font-size:.95rem">Tip: <b>save every password you find</b> &mdash; there's a notes panel beside the
 terminal. Your session can reset; the passwords are how you pick back up.</p>
-<a class=play href="/play">&gt; play</a>
+<form method="post" action="/play"><button class=play type=submit>&gt; play</button></form>
 </body></html>"""
 
 FULL = """<!doctype html><html><head><meta charset=utf-8><title>Server full</title>
 <style>body{background:#000;color:#ff5555;font-family:monospace;display:flex;height:100vh;
 align-items:center;justify-content:center;text-align:center}</style></head><body>
 <div><h1>server full</h1><p>All seats are taken right now. Try again in a few minutes.</p></div>
+</body></html>"""
+
+SLOWDOWN = """<!doctype html><html><head><meta charset=utf-8><title>Slow down</title>
+<style>body{background:#000;color:#ffcc33;font-family:monospace;display:flex;height:100vh;
+align-items:center;justify-content:center;text-align:center}</style></head><body>
+<div><h1>easy there</h1><p>You've started a few servers in a short time. Give it a
+couple of minutes, then <a style=color:#ffcc33 href="/">head back</a> and press Play.</p></div>
 </body></html>"""
 
 SPAWNING = """<!doctype html><html><head><meta charset=utf-8>
@@ -257,20 +286,33 @@ async def h_landing(request):
 
 
 async def h_play(request):
+    """POST only: find-or-create this visitor's container. A GET can never spawn
+    (so crawlers / prefetch / a one-line loop can't fill every seat)."""
     sid = request.cookies.get(COOKIE)
-    # returning visitor whose container is still alive → straight into the terminal
+    # returning visitor whose container is still alive → straight in, no new spawn
     if sid and sid in sessions:
         resp = web.HTTPFound(f"/app/{sid}")
         resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", path="/", max_age=MAX_LIFE)
         return resp
+    # new container: throttle per real client IP so one source can't take all seats
+    if throttled(client_ip(request)):
+        return web.Response(text=SLOWDOWN, content_type="text/html", status=429)
     sid = sid or secrets.token_hex(16)
-    # kick off provisioning in the background (unless already running) and answer instantly
     if sid not in sessions and states.get(sid) != "pending":
         states[sid] = "pending"
         asyncio.create_task(provision_bg(sid))
     resp = web.Response(text=SPAWNING.replace("__SID__", sid), content_type="text/html")
     resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", path="/", max_age=MAX_LIFE)
     return resp
+
+
+async def h_play_get(request):
+    """A GET must never create a container. Live sessions go to their terminal;
+    everyone else goes back to the landing page to press Play (which POSTs)."""
+    sid = request.cookies.get(COOKIE)
+    if sid and sid in sessions:
+        return web.HTTPFound(f"/app/{sid}")
+    return web.HTTPFound("/")
 
 
 async def h_ready(request):
@@ -282,8 +324,8 @@ async def h_ready(request):
 
 async def h_app(request):
     sid = request.match_info["sid"]
-    if sid not in sessions:          # expired/reset → back to the spinner, which re-provisions
-        return web.HTTPFound("/play")
+    if sid not in sessions:          # expired/reset → landing page (Play re-spawns via POST)
+        return web.HTTPFound("/")
     return web.Response(text=APP.replace("__SID__", sid), content_type="text/html")
 
 
@@ -372,7 +414,8 @@ def make_app():
     app = web.Application()
     app.add_routes([
         web.get("/", h_landing),
-        web.get("/play", h_play),
+        web.post("/play", h_play),      # spawning happens only on POST
+        web.get("/play", h_play_get),   # a GET never spawns
         web.get("/ready", h_ready),
         web.get("/app/{sid}", h_app),
         web.get("/healthz", h_health),
