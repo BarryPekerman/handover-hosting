@@ -1,0 +1,13 @@
+[Unit]
+Description=cloudflared tunnel (handover -> play.barrypekerman.com)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+ExecStart=/usr/bin/cloudflared --no-autoupdate --config /home/ubuntu/.cloudflared/config.yml tunnel run
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

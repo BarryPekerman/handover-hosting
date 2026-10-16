@@ -1,0 +1,8 @@
+# Python
+__pycache__/
+*.pyc
+# Runtime state / anything secret (never commit tunnel creds or session state)
+*.json
+.handover-sessions.json
+cert.pem
+*credentials*
