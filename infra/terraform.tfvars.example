@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars and fill in. OCIDs are identifiers, not secrets, but
+# terraform.tfvars is git-ignored anyway. These are the known values for the
+# current alexpaks tenancy / il-jerusalem-1.
+
+compartment_ocid    = "ocid1.tenancy.oc1..aaaaaaaaih4ar6vxhycodsyt5ivgwuehd7yvi7bnjrw4urv73w5lfxczrc7q"
+availability_domain = "dwHr:IL-JERUSALEM-1-AD-1"
+subnet_ocid         = "ocid1.subnet.oc1.il-jerusalem-1.aaaaaaaae63ydy72zzyffj27v2zhwveu2hspnmzue4k5ed2nomhq6kt5enna"
+ssh_public_key_path = "~/.ssh/alex_handover.pub"
+# oci_profile / region / shape / ocpus / memory_gbs default correctly in variables.tf
