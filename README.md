@@ -61,12 +61,23 @@ rule. Verified: a player container has only `lo`.
 ## Status
 
 - [x] Spawner: per-player isolated container, one-port HTTP+WS proxy, cookie
-      identity, global cap, return-visitor stickiness, lifecycle teardown. Verified
-      end-to-end on the OCI A1 host (banner streams through the proxied WebSocket).
-- [ ] Ingress: Cloudflare Tunnel (`cloudflared`), Turnstile, lock OCI security list.
-- [ ] DNS: `play.<domain>` via Cloudflare.
-- [ ] Landing-page polish + mobile key-bar (needs xterm.js or a ttyd theme).
+      identity, global cap, return-visitor stickiness, and **non-destructive
+      restarts** (re-adopts live containers + respawns ttyd on boot).
+- [x] Instant "spinning up…" spinner (provisions in the background).
+- [x] Browser UX: terminal + a localStorage **notes panel** (survives resets,
+      never sent to the server).
+- [x] Ingress: Cloudflare Tunnel (`cloudflared`) → `localhost:8080`; **no inbound
+      ports** on the box.
+- [x] DNS: live at **https://play.barrypekerman.com**.
+- [x] Abuse hardening: container creation is **POST-only** + a per-IP throttle
+      (keyed on `CF-Connecting-IP`), so crawlers/loops can't fill the seats.
+- [ ] Turnstile on the Play button + a Cloudflare per-IP rate-limit rule on
+      `/play` (both configured in the Cloudflare dashboard).
+- [ ] Lock the OCI security list to the admin IP (script staged).
+- [ ] Mobile key-bar (Esc/Ctrl/Tab/arrows) for phone play.
 - [ ] Analytics at teardown (playtime rows → SQLite).
-- [ ] btrfs/ZFS pool for ~1s CoW clones (currently `dir`: whole-rootfs copy, a few seconds/spawn).
+- [ ] btrfs/ZFS pool for ~1s CoW clones (currently `dir`: whole-rootfs copy).
+- [ ] Image-update propagation: a returning visitor keeps their existing
+      container, so a rebuilt image doesn't reach them until it recycles.
 
 See `bandit-wannabe/HOSTING.md` for the full design.
