@@ -25,8 +25,17 @@ write_files:
     permissions: "0644"
     content: |
       export PATH="$HOME/.local/bin:$PATH"
+  # Each nested in-game `ssh levelN@localhost` starts a systemd --user manager;
+  # they pile up and exhaust inotify instances ("Too many open files") by ~level
+  # 2 at the stock 128. Raise the host ceiling (it backs every container's users).
+  - path: /etc/sysctl.d/99-handover.conf
+    permissions: "0644"
+    content: |
+      fs.inotify.max_user_instances = 1024
+      fs.inotify.max_user_watches = 524288
 
 runcmd:
+  - sysctl --system    # apply the inotify limits above before anything runs
   # --- Incus ---
   - systemctl enable --now incus || true
   - incus admin init --minimal
