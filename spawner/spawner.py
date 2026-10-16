@@ -58,20 +58,33 @@ sessions: dict[str, dict] = {}
 locks: dict[str, asyncio.Lock] = {}      # per-sid provisioning lock
 states: dict[str, str] = {}              # sid -> "pending"|"full"|"error" (ready == in sessions)
 ip_hits: dict[str, list] = {}            # client IP -> recent provision timestamps (throttle)
-who: dict[str, str] = {}                 # sid -> leaderboard display name ("anonymous" until login)
-scored: set[str] = set()                 # sids already recorded on the leaderboard
+who: dict[str, dict] = {}                # sid -> {"uid": <github id>|None, "display": str}
 
 
 def db():
     c = sqlite3.connect(DB_PATH)
-    c.execute("CREATE TABLE IF NOT EXISTS scores "
-              "(sid TEXT PRIMARY KEY, display TEXT, total_seconds INTEGER, finished_at REAL)")
+    # key = GitHub uid for logged-in players (persists across sessions), or
+    # "anon:<sid>" for anonymous players (single-session). accumulated = sum of
+    # each level's solve time, counted once.
+    c.execute("CREATE TABLE IF NOT EXISTS players "
+              "(key TEXT PRIMARY KEY, display TEXT, max_level INTEGER, "
+              " accumulated INTEGER, finished INTEGER, updated REAL)")
     return c
 
 
+def player_row(key):
+    c = db()
+    row = c.execute("SELECT max_level, accumulated, finished FROM players WHERE key=?",
+                    (key,)).fetchone()
+    c.close()
+    return row  # (max_level, accumulated, finished) or None
+
+
 # Runs INSIDE a player container via `incus exec ... bash`. The box is
-# network-less, so it can't report victory itself — we read its own login
-# records. Win = a `dave` login exists; time = dave login minus level0's first.
+# network-less, so it can't report progress itself — we read its own login
+# records. Emits "<idx> <epoch>" for the EARLIEST login of each account:
+# level0..level20 -> 0..20, dave (the win) -> 21. The spawner turns consecutive
+# reaches into per-level durations.
 PROGRESS_SH = r'''
 set -uo pipefail
 collect() {
@@ -81,44 +94,62 @@ collect() {
   journalctl -q -o short-iso SYSLOG_IDENTIFIER=su --grep 'session opened for user' 2>/dev/null \
     | sed -nE 's/^([^ ]+) .*session opened for user ([A-Za-z0-9_]+)\(.*/\2 \1/p'
 }
-start=0; fin=0
+declare -A first
 while read -r u when; do
+  case "$u" in level[0-9]*) idx=${u#level};; dave) idx=21;; *) continue;; esac
   t=$(date -d "$when" +%s 2>/dev/null) || continue
-  if [ "$u" = level0 ]; then { [ "$start" = 0 ] || [ "$t" -lt "$start" ]; } && start=$t; fi
-  if [ "$u" = dave   ]; then { [ "$fin"   = 0 ] || [ "$t" -lt "$fin"   ]; } && fin=$t; fi
+  if [ -z "${first[$idx]:-}" ] || [ "$t" -lt "${first[$idx]}" ]; then first[$idx]=$t; fi
 done < <(collect)
-if [ "$start" != 0 ] && [ "$fin" != 0 ] && [ "$fin" -ge "$start" ]; then
-  echo "DONE $((fin - start))"
-else
-  echo "NOPE"
-fi
+for idx in "${!first[@]}"; do echo "$idx ${first[$idx]}"; done
 '''
 
 
-async def capture_finish(sid: str, ct: str):
-    """Record sid's finish time once, if its container shows a completed game."""
-    if sid in scored:
-        return
+async def update_progress(sid: str, ct: str):
+    """Fold this container's progress into the player's running tally. Keyed by
+    GitHub uid (cross-session) or anon:<sid> (single session). Adds only the
+    time for levels newly completed since the stored max, so fast re-climbs with
+    saved passwords don't double-count and between-session breaks never count."""
+    info = who.get(sid) or {"uid": None, "display": "anonymous"}
+    key = info["uid"] or ("anon:" + sid)
+    display = info["display"]
     rc, out = await run("incus", "exec", ct, "--", "bash", "-c", PROGRESS_SH)
-    line = out.strip().splitlines()[-1] if out.strip() else ""
-    if not line.startswith("DONE"):
+    reaches = {}
+    for ln in out.splitlines():
+        p = ln.split()
+        if len(p) == 2 and p[0].isdigit() and p[1].isdigit():
+            reaches[int(p[0])] = int(p[1])
+    if not reaches:
         return
-    total = int(line.split()[1])
-    display = who.get(sid, "anonymous")
+    new_max = max(reaches)
+    row = player_row(key)
+    prev_max, accum, finished = row if row else (0, 0, 0)
+    if new_max <= prev_max:
+        return                                   # no new levels completed
+    added = 0
+    for idx in range(prev_max, new_max):         # count each newly-completed level once
+        if idx in reaches and (idx + 1) in reaches:
+            d = reaches[idx + 1] - reaches[idx]
+            if d >= 0:
+                added += d
+    accum += added
+    finished = 1 if new_max >= 21 else finished
     try:
         c = db()
-        c.execute("INSERT OR IGNORE INTO scores VALUES (?,?,?,?)",
-                  (sid, display, total, time.time()))
+        c.execute("INSERT INTO players(key,display,max_level,accumulated,finished,updated) "
+                  "VALUES(?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
+                  "display=excluded.display, max_level=excluded.max_level, "
+                  "accumulated=excluded.accumulated, finished=excluded.finished, "
+                  "updated=excluded.updated",
+                  (key, display, new_max, accum, finished, time.time()))
         c.commit(); c.close()
     except Exception:
         log.exception("leaderboard write failed")
-    scored.add(sid)
-    log.info("finish recorded sid=%s who=%s total=%ds", sid[:12], display, total)
+    log.info("progress key=%s max=%d +%ds total=%ds fin=%d", key[:16], new_max, added, accum, finished)
 
 
 async def record_finishers():
     for sid, s in list(sessions.items()):
-        await capture_finish(sid, s["ct"])
+        await update_progress(sid, s["ct"])
 
 
 async def sweep_orphans():
@@ -269,12 +300,11 @@ async def provision_bg(sid: str):
 async def teardown(sid: str, reason: str = ""):
     s = sessions.get(sid)
     if s:
-        await capture_finish(sid, s["ct"])   # last chance to record a win
+        await update_progress(sid, s["ct"])   # last chance to fold in progress
     s = sessions.pop(sid, None)
     locks.pop(sid, None)
     states.pop(sid, None)
     who.pop(sid, None)
-    scored.discard(sid)
     if not s:
         return
     log.info("teardown sid=%s ct=%s (%s)", sid[:12], s["ct"], reason)
@@ -447,7 +477,14 @@ async def h_landing(request):
         script = widget = ""
     uid, disp = identity(request)
     if uid:
-        signin = (f'signed in as {html.escape(disp)} &middot; '
+        row = player_row(uid)
+        resume = ""
+        if row and row[2]:
+            resume = " &middot; you finished &#127881;"
+        elif row and row[0] and row[0] > 0:
+            lvl = min(row[0], 20)
+            resume = f' &middot; you reached level {lvl} &mdash; <code>go {lvl}</code> to resume'
+        signin = (f'signed in as {html.escape(disp)}{resume} &middot; '
                   '<a href="/logout" style="color:#33ff66">log out</a>')
     elif oauth_ready():
         signin = ('<a href="/login" style="color:#33ff66">sign in with GitHub</a>'
@@ -490,7 +527,8 @@ async def h_play(request):
     sid = request.cookies.get(COOKIE)
     # returning visitor whose container is still alive → straight in, no new spawn
     if sid and sid in sessions:
-        who[sid] = identity_display(request)
+        uid, disp = identity(request)
+        who[sid] = {"uid": uid, "display": disp}
         resp = web.HTTPFound(f"/app/{sid}")
         resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", path="/", max_age=MAX_LIFE)
         return resp
@@ -504,7 +542,8 @@ async def h_play(request):
     if throttled(ip):
         return web.Response(text=SLOWDOWN, content_type="text/html", status=429)
     sid = sid or secrets.token_hex(16)
-    who[sid] = identity_display(request)
+    uid, disp = identity(request)
+    who[sid] = {"uid": uid, "display": disp}
     if sid not in sessions and states.get(sid) != "pending":
         states[sid] = "pending"
         asyncio.create_task(provision_bg(sid))
@@ -591,8 +630,8 @@ async def h_leaderboard(request):
     rows = []
     try:
         c = db()
-        rows = c.execute("SELECT display, total_seconds FROM scores "
-                         "ORDER BY total_seconds ASC LIMIT 50").fetchall()
+        rows = c.execute("SELECT display, accumulated FROM players "
+                         "WHERE finished=1 ORDER BY accumulated ASC LIMIT 50").fetchall()
         c.close()
     except Exception:
         log.exception("leaderboard read failed")
