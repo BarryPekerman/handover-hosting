@@ -1,0 +1,52 @@
+name: deploy
+
+# Push to master (spawner/tunnel changes) → redeploy to the host and inject the
+# Turnstile secret from GitHub Secrets. The hostile game box is never a secrets
+# client: CD (trusted) pushes a rendered env file to it. Swap GitHub Secrets for
+# HashiCorp Vault here later without touching the host (box never calls Vault).
+on:
+  push:
+    branches: [master]
+    paths: ["spawner/**", "cloudflared/**", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+concurrency: deploy        # never overlap two deploys
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HOST: ${{ secrets.DEPLOY_HOST }}
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Set up SSH to the host
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id
+          chmod 600 ~/.ssh/id
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Copy spawner, unit, and tunnel config
+        run: |
+          scp -i ~/.ssh/id spawner/spawner.py                ubuntu@"$HOST":~/spawner.py
+          scp -i ~/.ssh/id spawner/handover-spawner.service  ubuntu@"$HOST":/tmp/handover-spawner.service
+          scp -i ~/.ssh/id cloudflared/config.yml            ubuntu@"$HOST":~/.cloudflared/config.yml
+
+      - name: Inject secret, install unit, restart (non-destructive)
+        env:
+          TS: ${{ secrets.TURNSTILE_SECRET }}
+        run: |
+          # secret travels over stdin, never in the host's process args
+          printf 'TURNSTILE_SECRET=%s\n' "$TS" | ssh -i ~/.ssh/id ubuntu@"$HOST" '
+            umask 077
+            cat > /home/ubuntu/handover-spawner.env
+            chmod 600 /home/ubuntu/handover-spawner.env
+            sudo mv /tmp/handover-spawner.service /etc/systemd/system/handover-spawner.service
+            sudo systemctl daemon-reload
+            sudo systemctl restart handover-spawner
+            sleep 2
+            echo "health: $(curl -s 127.0.0.1:8080/healthz)"
+          '
