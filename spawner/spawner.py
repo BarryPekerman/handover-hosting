@@ -17,7 +17,7 @@ Config via env (all optional):
   MAX_PLAYERS=20         IDLE_MIN=60   MAX_LIFETIME_MIN=1440
   TTYD_PORT_BASE=8100    LOGIN_USER=level0
 """
-import asyncio, os, secrets, time, logging, json, sqlite3, html
+import asyncio, os, secrets, time, logging, json, sqlite3, html, hmac, hashlib, base64
 from aiohttp import web, ClientSession, WSMsgType, ClientTimeout
 
 LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
@@ -43,6 +43,12 @@ TS_ACTION   = os.environ.get("TURNSTILE_ACTION", "play")
 TS_HOSTS    = {h.strip() for h in os.environ.get(
     "TURNSTILE_HOSTNAMES", "play.barrypekerman.com,barrypekerman.com").split(",") if h.strip()}
 TS_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+# GitHub OAuth (optional login, for the cross-session leaderboard). Client id is
+# public (unit); secret + session-signing key are host-only (EnvironmentFile).
+PUBLIC_URL       = os.environ.get("PUBLIC_URL", "https://play.barrypekerman.com")
+GH_CLIENT_ID     = os.environ.get("GH_CLIENT_ID", "")
+GH_CLIENT_SECRET = os.environ.get("GH_CLIENT_SECRET", "")
+SESSION_SECRET   = os.environ.get("SESSION_SECRET", "")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("spawner")
@@ -122,10 +128,36 @@ def client_ip(request) -> str:
             or request.remote or "?")
 
 
+def _sign(payload: dict) -> str:
+    raw = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
+    sig = hmac.new(SESSION_SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()
+    return raw + "." + sig
+
+
+def _unsign(token: str):
+    try:
+        raw, sig = token.rsplit(".", 1)
+        good = hmac.new(SESSION_SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, good):
+            return None
+        return json.loads(base64.urlsafe_b64decode(raw.encode()))
+    except Exception:
+        return None
+
+
+def identity(request):
+    """(uid, display) from the signed ghid cookie, or (None, 'anonymous')."""
+    if not SESSION_SECRET:
+        return (None, "anonymous")
+    tok = request.cookies.get("ghid")
+    p = _unsign(tok) if tok else None
+    if not p:
+        return (None, "anonymous")
+    return (str(p.get("uid")), "@" + str(p.get("login", "?")))
+
+
 def identity_display(request) -> str:
-    """Leaderboard name for this visitor. 'anonymous' until GitHub login is wired
-    (the OAuth callback will set a signed identity cookie this reads)."""
-    return "anonymous"
+    return identity(request)[1]
 
 
 def throttled(ip: str) -> bool:
@@ -276,6 +308,7 @@ A browser terminal is all you need. Type <code>mail</code> to start.</p>
 terminal. Your session can reset; the passwords are how you pick back up.</p>
 <form method="post" action="/play">__TS_WIDGET__<br><button class=play type=submit>&gt; play</button></form>
 <p style="margin-top:1.5rem"><a href="/leaderboard" style="color:#33ff66;opacity:.8">leaderboard &rarr;</a></p>
+<p style="opacity:.8;font-size:.9rem">__SIGNIN__</p>
 </body></html>"""
 
 FULL = """<!doctype html><html><head><meta charset=utf-8><title>Server full</title>
@@ -397,7 +430,18 @@ async def h_landing(request):
                   f' data-action="{TS_ACTION}" data-theme="dark"></div>')
     else:
         script = widget = ""
-    page = LANDING.replace("__TS_SCRIPT__", script).replace("__TS_WIDGET__", widget)
+    uid, disp = identity(request)
+    if uid:
+        signin = (f'signed in as {html.escape(disp)} &middot; '
+                  '<a href="/logout" style="color:#33ff66">log out</a>')
+    elif oauth_ready():
+        signin = ('<a href="/login" style="color:#33ff66">sign in with GitHub</a>'
+                  ' &mdash; save progress &amp; join the leaderboard across sessions')
+    else:
+        signin = ""
+    page = (LANDING.replace("__TS_SCRIPT__", script)
+                   .replace("__TS_WIDGET__", widget)
+                   .replace("__SIGNIN__", signin))
     return web.Response(text=page, content_type="text/html")
 
 
@@ -544,6 +588,60 @@ async def h_leaderboard(request):
     return web.Response(text=LEADERBOARD.replace("__ROWS__", body), content_type="text/html")
 
 
+def oauth_ready() -> bool:
+    return bool(GH_CLIENT_ID and GH_CLIENT_SECRET and SESSION_SECRET)
+
+
+async def h_login(request):
+    if not oauth_ready():
+        return web.HTTPFound("/")
+    state = secrets.token_urlsafe(16)
+    url = ("https://github.com/login/oauth/authorize"
+           f"?client_id={GH_CLIENT_ID}&redirect_uri={PUBLIC_URL}/auth/callback"
+           f"&scope=read:user&state={state}")
+    resp = web.HTTPFound(url)
+    resp.set_cookie("oauth_state", state, httponly=True, samesite="Lax", max_age=600, path="/")
+    return resp
+
+
+async def h_callback(request):
+    code = request.query.get("code", "")
+    state = request.query.get("state", "")
+    if not oauth_ready() or not code or not state or state != request.cookies.get("oauth_state"):
+        return web.HTTPFound("/")
+    try:
+        async with ClientSession() as cs:
+            async with cs.post("https://github.com/login/oauth/access_token",
+                               headers={"Accept": "application/json"},
+                               data={"client_id": GH_CLIENT_ID, "client_secret": GH_CLIENT_SECRET,
+                                     "code": code, "redirect_uri": f"{PUBLIC_URL}/auth/callback"},
+                               timeout=ClientTimeout(total=10)) as r:
+                tok = (await r.json()).get("access_token")
+            if not tok:
+                return web.HTTPFound("/")
+            async with cs.get("https://api.github.com/user",
+                              headers={"Authorization": f"Bearer {tok}", "User-Agent": "handover",
+                                       "Accept": "application/vnd.github+json"},
+                              timeout=ClientTimeout(total=10)) as r:
+                u = await r.json()
+    except Exception:
+        log.exception("github oauth error")
+        return web.HTTPFound("/")
+    if not u.get("id") or not u.get("login"):
+        return web.HTTPFound("/")
+    resp = web.HTTPFound("/")
+    resp.set_cookie("ghid", _sign({"uid": u["id"], "login": u["login"]}),
+                    httponly=True, samesite="Lax", secure=True, max_age=MAX_LIFE, path="/")
+    resp.del_cookie("oauth_state", path="/")
+    return resp
+
+
+async def h_logout(request):
+    resp = web.HTTPFound("/")
+    resp.del_cookie("ghid", path="/")
+    return resp
+
+
 async def h_health(request):
     return web.json_response({"players": len(sessions), "max": MAX_PLAYERS})
 
@@ -588,6 +686,9 @@ def make_app():
         web.get("/ready", h_ready),
         web.get("/app/{sid}", h_app),
         web.get("/leaderboard", h_leaderboard),
+        web.get("/login", h_login),
+        web.get("/auth/callback", h_callback),
+        web.get("/logout", h_logout),
         web.get("/healthz", h_health),
         web.route("*", "/t/{sid}/{tail:.*}", h_proxy),
     ])
