@@ -249,6 +249,10 @@ async def start_ttyd(sid: str, ct: str, port: int):
     """Launch a ttyd bound to loopback that attaches into the container."""
     return await asyncio.create_subprocess_exec(
         "ttyd", "-p", str(port), "-i", "127.0.0.1", "-b", f"/t/{sid}",
+        # A slightly smaller font buys a few more columns on narrow phone
+        # screens (xterm's fit addon derives columns from pixel width / char
+        # width) while staying readable on a desktop.
+        "-t", "fontSize=13",
         "-W", "incus", "exec", ct, "--", "su", "-", LOGIN_USER,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
