@@ -35,12 +35,15 @@ jobs:
           scp -i ~/.ssh/id spawner/handover-spawner.service  ubuntu@"$HOST":/tmp/handover-spawner.service
           scp -i ~/.ssh/id cloudflared/config.yml            ubuntu@"$HOST":~/.cloudflared/config.yml
 
-      - name: Inject secret, install unit, restart (non-destructive)
+      - name: Inject secrets, install unit, restart (non-destructive)
         env:
           TS: ${{ secrets.TURNSTILE_SECRET }}
+          GH: ${{ secrets.GH_CLIENT_SECRET }}
+          SS: ${{ secrets.SESSION_SECRET }}
         run: |
-          # secret travels over stdin, never in the host's process args
-          printf 'TURNSTILE_SECRET=%s\n' "$TS" | ssh -i ~/.ssh/id ubuntu@"$HOST" '
+          # secrets travel over stdin, never in the host's process args
+          printf 'TURNSTILE_SECRET=%s\nGH_CLIENT_SECRET=%s\nSESSION_SECRET=%s\n' "$TS" "$GH" "$SS" \
+            | ssh -i ~/.ssh/id ubuntu@"$HOST" '
             umask 077
             cat > /home/ubuntu/handover-spawner.env
             chmod 600 /home/ubuntu/handover-spawner.env

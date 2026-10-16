@@ -18,6 +18,8 @@ Environment=MAX_LIFETIME_MIN=1440
 # below (host-only, git-ignored); the leading '-' means "optional, don't fail
 # if absent" so the service still starts before the secret is placed.
 Environment=TURNSTILE_SITEKEY=0x4AAAAAAFYDIEkAlY8LK_O4
+# GitHub OAuth client id is public; the secret + SESSION_SECRET are in the env file.
+Environment=GH_CLIENT_ID=Ov23liyV2xQUpVi7OWOC
 EnvironmentFile=-/home/ubuntu/handover-spawner.env
 
 [Install]
