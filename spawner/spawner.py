@@ -18,7 +18,7 @@ Config via env (all optional):
   TTYD_PORT_BASE=8100    LOGIN_USER=level0
 """
 import asyncio, os, secrets, time, logging, json
-from aiohttp import web, ClientSession, WSMsgType
+from aiohttp import web, ClientSession, WSMsgType, ClientTimeout
 
 LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8080"))
@@ -33,6 +33,15 @@ COOKIE      = "hid"
 STATE_FILE  = os.environ.get("STATE_FILE", os.path.expanduser("~/.handover-sessions.json"))
 RATE_MAX    = int(os.environ.get("RATE_MAX", "5"))       # new containers per IP ...
 RATE_WINDOW = int(os.environ.get("RATE_WINDOW", "600"))  # ... per this many seconds
+# Turnstile (Cloudflare bot check). Sitekey is public; secret lives only on the
+# host (EnvironmentFile), never in git. Verification is enforced only when the
+# secret is present, so the site keeps working until it's placed.
+TS_SITEKEY  = os.environ.get("TURNSTILE_SITEKEY", "")
+TS_SECRET   = os.environ.get("TURNSTILE_SECRET", "")
+TS_ACTION   = os.environ.get("TURNSTILE_ACTION", "play")
+TS_HOSTS    = {h.strip() for h in os.environ.get(
+    "TURNSTILE_HOSTNAMES", "play.barrypekerman.com,barrypekerman.com").split(",") if h.strip()}
+TS_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("spawner")
@@ -184,13 +193,14 @@ justify-content:center;background:#000;color:#33ff66;font-family:monospace;text-
 background:none;font-family:monospace;font-size:1.2rem;cursor:pointer}
 .play:hover{background:#33ff66;color:#000}
 p{max-width:34rem;line-height:1.5;padding:0 1rem}
-</style></head><body>
+.cf-turnstile{margin:1.4rem auto 0}
+</style>__TS_SCRIPT__</head><body>
 <h1>THE HANDOVER</h1>
 <p>Dave quit &mdash; won the lottery &mdash; and left you his server. He left mail, too.
 A browser terminal is all you need. Type <code>mail</code> to start.</p>
 <p style="opacity:.75;font-size:.95rem">Tip: <b>save every password you find</b> &mdash; there's a notes panel beside the
 terminal. Your session can reset; the passwords are how you pick back up.</p>
-<form method="post" action="/play"><button class=play type=submit>&gt; play</button></form>
+<form method="post" action="/play">__TS_WIDGET__<br><button class=play type=submit>&gt; play</button></form>
 </body></html>"""
 
 FULL = """<!doctype html><html><head><meta charset=utf-8><title>Server full</title>
@@ -204,6 +214,13 @@ SLOWDOWN = """<!doctype html><html><head><meta charset=utf-8><title>Slow down</t
 align-items:center;justify-content:center;text-align:center}</style></head><body>
 <div><h1>easy there</h1><p>You've started a few servers in a short time. Give it a
 couple of minutes, then <a style=color:#ffcc33 href="/">head back</a> and press Play.</p></div>
+</body></html>"""
+
+TS_FAIL = """<!doctype html><html><head><meta charset=utf-8><title>Are you human?</title>
+<style>body{background:#000;color:#ff5555;font-family:monospace;display:flex;height:100vh;
+align-items:center;justify-content:center;text-align:center}</style></head><body>
+<div><h1>couldn't verify you</h1><p>The human check didn't pass. <a style=color:#ff5555
+href="/">go back</a> and press Play again.</p></div>
 </body></html>"""
 
 SPAWNING = """<!doctype html><html><head><meta charset=utf-8>
@@ -282,7 +299,39 @@ if(matchMedia('(max-width:700px)').matches)notes.classList.add('hidden');
 
 
 async def h_landing(request):
-    return web.Response(text=LANDING, content_type="text/html")
+    if TS_SITEKEY:
+        script = ('<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"'
+                  ' async defer></script>')
+        widget = (f'<div class="cf-turnstile" data-sitekey="{TS_SITEKEY}"'
+                  f' data-action="{TS_ACTION}" data-theme="dark"></div>')
+    else:
+        script = widget = ""
+    page = LANDING.replace("__TS_SCRIPT__", script).replace("__TS_WIDGET__", widget)
+    return web.Response(text=page, content_type="text/html")
+
+
+async def verify_turnstile(token: str, ip: str) -> bool:
+    """Server-side Turnstile check. No secret configured -> don't block (lets the
+    site run before the secret is placed). Token is single-use."""
+    if not TS_SECRET:
+        return True
+    if not token:
+        return False
+    body = {"secret": TS_SECRET, "response": token, "remoteip": ip}
+    try:
+        async with ClientSession() as cs:
+            async with cs.post(TS_VERIFY_URL, data=body, timeout=ClientTimeout(total=10)) as r:
+                j = await r.json()
+    except Exception:
+        log.exception("turnstile siteverify error")
+        return False
+    ok = (bool(j.get("success"))
+          and j.get("action") == TS_ACTION
+          and (not TS_HOSTS or j.get("hostname") in TS_HOSTS))
+    if not ok:
+        log.warning("turnstile reject: %s",
+                    {k: j.get(k) for k in ("success", "action", "hostname", "error-codes")})
+    return ok
 
 
 async def h_play(request):
@@ -294,8 +343,14 @@ async def h_play(request):
         resp = web.HTTPFound(f"/app/{sid}")
         resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", path="/", max_age=MAX_LIFE)
         return resp
+    ip = client_ip(request)
+    # bot check before we spend a container (no-op until the secret is configured)
+    if TS_SECRET:
+        form = await request.post()
+        if not await verify_turnstile(form.get("cf-turnstile-response", ""), ip):
+            return web.Response(text=TS_FAIL, content_type="text/html", status=403)
     # new container: throttle per real client IP so one source can't take all seats
-    if throttled(client_ip(request)):
+    if throttled(ip):
         return web.Response(text=SLOWDOWN, content_type="text/html", status=429)
     sid = sid or secrets.token_hex(16)
     if sid not in sessions and states.get(sid) != "pending":
