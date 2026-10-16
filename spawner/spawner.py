@@ -104,11 +104,22 @@ for idx in "${!first[@]}"; do echo "$idx ${first[$idx]}"; done
 '''
 
 
+async def push_playtime(ct: str, secs: int):
+    """Write the player's running total (seconds) into the network-less
+    container, so the victory screen can show the real cross-session time
+    instead of just this box's own clock. Best-effort; tmpfs, world-readable."""
+    cmd = ("mkdir -p /run/handover && echo %d > /run/handover/playtime "
+           "&& chmod 644 /run/handover/playtime" % int(secs))
+    await run("incus", "exec", ct, "--", "bash", "-c", cmd)
+
+
 async def update_progress(sid: str, ct: str):
     """Fold this container's progress into the player's running tally. Keyed by
     GitHub uid (cross-session) or anon:<sid> (single session). Adds only the
     time for levels newly completed since the stored max, so fast re-climbs with
-    saved passwords don't double-count and between-session breaks never count."""
+    saved passwords don't double-count and between-session breaks never count.
+    Always pushes the player's current total back into the container for the
+    victory screen."""
     info = who.get(sid) or {"uid": None, "display": "anonymous"}
     key = info["uid"] or ("anon:" + sid)
     display = info["display"]
@@ -118,33 +129,32 @@ async def update_progress(sid: str, ct: str):
         p = ln.split()
         if len(p) == 2 and p[0].isdigit() and p[1].isdigit():
             reaches[int(p[0])] = int(p[1])
-    if not reaches:
-        return
-    new_max = max(reaches)
     row = player_row(key)
     prev_max, accum, finished = row if row else (0, 0, 0)
-    if new_max <= prev_max:
-        return                                   # no new levels completed
-    added = 0
-    for idx in range(prev_max, new_max):         # count each newly-completed level once
-        if idx in reaches and (idx + 1) in reaches:
-            d = reaches[idx + 1] - reaches[idx]
-            if d >= 0:
-                added += d
-    accum += added
-    finished = 1 if new_max >= 21 else finished
-    try:
-        c = db()
-        c.execute("INSERT INTO players(key,display,max_level,accumulated,finished,updated) "
-                  "VALUES(?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
-                  "display=excluded.display, max_level=excluded.max_level, "
-                  "accumulated=excluded.accumulated, finished=excluded.finished, "
-                  "updated=excluded.updated",
-                  (key, display, new_max, accum, finished, time.time()))
-        c.commit(); c.close()
-    except Exception:
-        log.exception("leaderboard write failed")
-    log.info("progress key=%s max=%d +%ds total=%ds fin=%d", key[:16], new_max, added, accum, finished)
+    new_max = max(reaches) if reaches else prev_max
+    if reaches and new_max > prev_max:           # new levels completed this poll
+        added = 0
+        for idx in range(prev_max, new_max):     # count each newly-completed level once
+            if idx in reaches and (idx + 1) in reaches:
+                d = reaches[idx + 1] - reaches[idx]
+                if d >= 0:
+                    added += d
+        accum += added
+        finished = 1 if new_max >= 21 else finished
+        try:
+            c = db()
+            c.execute("INSERT INTO players(key,display,max_level,accumulated,finished,updated) "
+                      "VALUES(?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
+                      "display=excluded.display, max_level=excluded.max_level, "
+                      "accumulated=excluded.accumulated, finished=excluded.finished, "
+                      "updated=excluded.updated",
+                      (key, display, new_max, accum, finished, time.time()))
+            c.commit(); c.close()
+        except Exception:
+            log.exception("leaderboard write failed")
+        log.info("progress key=%s max=%d +%ds total=%ds fin=%d", key[:16], new_max, added, accum, finished)
+    # The container is network-less and can't read the DB, so hand it the total.
+    await push_playtime(ct, accum)
 
 
 async def record_finishers():
