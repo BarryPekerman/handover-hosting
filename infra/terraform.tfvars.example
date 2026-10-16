@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars and fill in. OCIDs are identifiers, not secrets, but
+# terraform.tfvars is git-ignored anyway. These are the known values for the
+# current handover tenancy / il-jerusalem-1.
+
+compartment_ocid    = "ocid1.tenancy.oc1..aaaaEXAMPLE"
+availability_domain = "EXMP:IL-JERUSALEM-1-AD-1"
+subnet_ocid         = "ocid1.subnet.oc1.il-jerusalem-1.aaaaEXAMPLE"
+ssh_public_key_path = "~/.ssh/handover.pub"
+# oci_profile / region / shape / ocpus / memory_gbs default correctly in variables.tf
