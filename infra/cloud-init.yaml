@@ -52,7 +52,7 @@ runcmd:
 
   # --- build the game image from the PUBLIC repo, pinned ansible + collections.
   #     Run as root so Incus access doesn't depend on a fresh login shell. ---
-  - git clone https://github.com/BarryPekerman/bandit-wannabe /opt/bandit-wannabe
+  - git clone -b local-rebuild https://github.com/BarryPekerman/bandit-wannabe /opt/bandit-wannabe
   - pipx install "ansible-core==2.21.5"
   - /root/.local/bin/ansible-galaxy collection install -r /opt/bandit-wannabe/requirements.yml
   - bash -c 'cd /opt/bandit-wannabe && PATH=/root/.local/bin:$PATH ./scripts/incus-image.sh build'
