@@ -57,7 +57,12 @@ resource "oci_core_instance" "handover" {
   # replace of a running instance - rebuilds are a deliberate, manual act.
   lifecycle {
     prevent_destroy = true
-    ignore_changes  = [source_details[0].source_id, metadata["user_data"]]
+    # The live box was hand-built (no user_data, slightly different key
+    # formatting) and its image/boot details are provider-computed. Ignore the
+    # whole metadata block + the image id so *adopting* the running instance is
+    # a no-op. A from-scratch `apply` still sets metadata/cloud-init, because
+    # ignore_changes only affects updates, never creation.
+    ignore_changes = [metadata, source_details[0].source_id]
   }
 }
 
