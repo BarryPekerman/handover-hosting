@@ -17,7 +17,7 @@ Config via env (all optional):
   MAX_PLAYERS=20         IDLE_MIN=60   MAX_LIFETIME_MIN=1440
   TTYD_PORT_BASE=8100    LOGIN_USER=level0
 """
-import asyncio, os, secrets, time, logging, json
+import asyncio, os, secrets, time, logging, json, sqlite3, html
 from aiohttp import web, ClientSession, WSMsgType, ClientTimeout
 
 LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
@@ -31,6 +31,7 @@ PORT_BASE   = int(os.environ.get("TTYD_PORT_BASE", "8100"))
 LOGIN_USER  = os.environ.get("LOGIN_USER", "level0")
 COOKIE      = "hid"
 STATE_FILE  = os.environ.get("STATE_FILE", os.path.expanduser("~/.handover-sessions.json"))
+DB_PATH     = os.environ.get("LEADERBOARD_DB", os.path.expanduser("~/handover-leaderboard.db"))
 RATE_MAX    = int(os.environ.get("RATE_MAX", "5"))       # new containers per IP ...
 RATE_WINDOW = int(os.environ.get("RATE_WINDOW", "600"))  # ... per this many seconds
 # Turnstile (Cloudflare bot check). Sitekey is public; secret lives only on the
@@ -51,6 +52,67 @@ sessions: dict[str, dict] = {}
 locks: dict[str, asyncio.Lock] = {}      # per-sid provisioning lock
 states: dict[str, str] = {}              # sid -> "pending"|"full"|"error" (ready == in sessions)
 ip_hits: dict[str, list] = {}            # client IP -> recent provision timestamps (throttle)
+who: dict[str, str] = {}                 # sid -> leaderboard display name ("anonymous" until login)
+scored: set[str] = set()                 # sids already recorded on the leaderboard
+
+
+def db():
+    c = sqlite3.connect(DB_PATH)
+    c.execute("CREATE TABLE IF NOT EXISTS scores "
+              "(sid TEXT PRIMARY KEY, display TEXT, total_seconds INTEGER, finished_at REAL)")
+    return c
+
+
+# Runs INSIDE a player container via `incus exec ... bash`. The box is
+# network-less, so it can't report victory itself — we read its own login
+# records. Win = a `dave` login exists; time = dave login minus level0's first.
+PROGRESS_SH = r'''
+set -uo pipefail
+collect() {
+  for f in /var/log/wtmp.1 /var/log/wtmp; do
+    [ -f "$f" ] && last -f "$f" --time-format iso -w 2>/dev/null | awk '$2 ~ /^pts/ {print $1, $4}'
+  done
+  journalctl -q -o short-iso SYSLOG_IDENTIFIER=su --grep 'session opened for user' 2>/dev/null \
+    | sed -nE 's/^([^ ]+) .*session opened for user ([A-Za-z0-9_]+)\(.*/\2 \1/p'
+}
+start=0; fin=0
+while read -r u when; do
+  t=$(date -d "$when" +%s 2>/dev/null) || continue
+  if [ "$u" = level0 ]; then { [ "$start" = 0 ] || [ "$t" -lt "$start" ]; } && start=$t; fi
+  if [ "$u" = dave   ]; then { [ "$fin"   = 0 ] || [ "$t" -lt "$fin"   ]; } && fin=$t; fi
+done < <(collect)
+if [ "$start" != 0 ] && [ "$fin" != 0 ] && [ "$fin" -ge "$start" ]; then
+  echo "DONE $((fin - start))"
+else
+  echo "NOPE"
+fi
+'''
+
+
+async def capture_finish(sid: str, ct: str):
+    """Record sid's finish time once, if its container shows a completed game."""
+    if sid in scored:
+        return
+    rc, out = await run("incus", "exec", ct, "--", "bash", "-c", PROGRESS_SH)
+    line = out.strip().splitlines()[-1] if out.strip() else ""
+    if not line.startswith("DONE"):
+        return
+    total = int(line.split()[1])
+    display = who.get(sid, "anonymous")
+    try:
+        c = db()
+        c.execute("INSERT OR IGNORE INTO scores VALUES (?,?,?,?)",
+                  (sid, display, total, time.time()))
+        c.commit(); c.close()
+    except Exception:
+        log.exception("leaderboard write failed")
+    scored.add(sid)
+    log.info("finish recorded sid=%s who=%s total=%ds", sid[:12], display, total)
+
+
+async def record_finishers():
+    for sid, s in list(sessions.items()):
+        await capture_finish(sid, s["ct"])
 
 
 def client_ip(request) -> str:
@@ -58,6 +120,12 @@ def client_ip(request) -> str:
     return (request.headers.get("CF-Connecting-IP")
             or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
             or request.remote or "?")
+
+
+def identity_display(request) -> str:
+    """Leaderboard name for this visitor. 'anonymous' until GitHub login is wired
+    (the OAuth callback will set a signed identity cookie this reads)."""
+    return "anonymous"
 
 
 def throttled(ip: str) -> bool:
@@ -153,9 +221,14 @@ async def provision_bg(sid: str):
 
 
 async def teardown(sid: str, reason: str = ""):
+    s = sessions.get(sid)
+    if s:
+        await capture_finish(sid, s["ct"])   # last chance to record a win
     s = sessions.pop(sid, None)
     locks.pop(sid, None)
     states.pop(sid, None)
+    who.pop(sid, None)
+    scored.discard(sid)
     if not s:
         return
     log.info("teardown sid=%s ct=%s (%s)", sid[:12], s["ct"], reason)
@@ -171,6 +244,7 @@ async def reaper(app):
     try:
         while True:
             await asyncio.sleep(30)
+            await record_finishers()      # capture victories before reaping
             now = time.time()
             for sid, s in list(sessions.items()):
                 if now - s["last"] > IDLE_SEC:
@@ -201,6 +275,7 @@ A browser terminal is all you need. Type <code>mail</code> to start.</p>
 <p style="opacity:.75;font-size:.95rem">Tip: <b>save every password you find</b> &mdash; there's a notes panel beside the
 terminal. Your session can reset; the passwords are how you pick back up.</p>
 <form method="post" action="/play">__TS_WIDGET__<br><button class=play type=submit>&gt; play</button></form>
+<p style="margin-top:1.5rem"><a href="/leaderboard" style="color:#33ff66;opacity:.8">leaderboard &rarr;</a></p>
 </body></html>"""
 
 FULL = """<!doctype html><html><head><meta charset=utf-8><title>Server full</title>
@@ -221,6 +296,22 @@ TS_FAIL = """<!doctype html><html><head><meta charset=utf-8><title>Are you human
 align-items:center;justify-content:center;text-align:center}</style></head><body>
 <div><h1>couldn't verify you</h1><p>The human check didn't pass. <a style=color:#ff5555
 href="/">go back</a> and press Play again.</p></div>
+</body></html>"""
+
+LEADERBOARD = """<!doctype html><html><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>The Handover - leaderboard</title><style>
+:root{color-scheme:dark}
+body{margin:0;min-height:100vh;background:#000;color:#33ff66;font-family:monospace;
+display:flex;flex-direction:column;align-items:center;padding:2rem 1rem}
+h1{margin:.2rem 0}table{border-collapse:collapse;margin-top:1.2rem;width:100%;max-width:34rem}
+td,th{padding:.4rem .8rem;border-bottom:1px solid #0a3;text-align:left}
+th{opacity:.7;font-weight:normal}td:first-child{opacity:.6}td:last-child{text-align:right}
+a{color:#33ff66}p{opacity:.7}
+</style></head><body>
+<h1>THE HANDOVER</h1><p>fastest to recover Dave's admin password</p>
+<table><tr><th>#</th><th>who</th><th>time</th></tr>__ROWS__</table>
+<p style="margin-top:1.5rem"><a href="/">&larr; back</a></p>
 </body></html>"""
 
 SPAWNING = """<!doctype html><html><head><meta charset=utf-8>
@@ -340,6 +431,7 @@ async def h_play(request):
     sid = request.cookies.get(COOKIE)
     # returning visitor whose container is still alive → straight in, no new spawn
     if sid and sid in sessions:
+        who[sid] = identity_display(request)
         resp = web.HTTPFound(f"/app/{sid}")
         resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", path="/", max_age=MAX_LIFE)
         return resp
@@ -353,6 +445,7 @@ async def h_play(request):
     if throttled(ip):
         return web.Response(text=SLOWDOWN, content_type="text/html", status=429)
     sid = sid or secrets.token_hex(16)
+    who[sid] = identity_display(request)
     if sid not in sessions and states.get(sid) != "pending":
         states[sid] = "pending"
         asyncio.create_task(provision_bg(sid))
@@ -431,11 +524,32 @@ async def h_proxy(request):
             return web.Response(status=r.status, headers=out, body=body)
 
 
+def fmt_dur(sec: int) -> str:
+    return f"{sec // 3600}:{(sec % 3600) // 60:02d}:{sec % 60:02d}"
+
+
+async def h_leaderboard(request):
+    rows = []
+    try:
+        c = db()
+        rows = c.execute("SELECT display, total_seconds FROM scores "
+                         "ORDER BY total_seconds ASC LIMIT 50").fetchall()
+        c.close()
+    except Exception:
+        log.exception("leaderboard read failed")
+    body = "".join(
+        f"<tr><td>{i + 1}</td><td>{html.escape(d)}</td><td>{fmt_dur(t)}</td></tr>"
+        for i, (d, t) in enumerate(rows)
+    ) or '<tr><td colspan="3">nobody\'s finished yet — be the first.</td></tr>'
+    return web.Response(text=LEADERBOARD.replace("__ROWS__", body), content_type="text/html")
+
+
 async def h_health(request):
     return web.json_response({"players": len(sessions), "max": MAX_PLAYERS})
 
 
 async def on_start(app):
+    db().close()   # ensure the leaderboard table exists
     # Re-adopt containers that outlived a previous spawner (deploy/crash/reboot).
     # Incus keeps the containers running; only our in-memory map + ttyd procs are
     # lost, so clear any stale ttyd and respawn one per still-live container.
@@ -473,6 +587,7 @@ def make_app():
         web.get("/play", h_play_get),   # a GET never spawns
         web.get("/ready", h_ready),
         web.get("/app/{sid}", h_app),
+        web.get("/leaderboard", h_leaderboard),
         web.get("/healthz", h_health),
         web.route("*", "/t/{sid}/{tail:.*}", h_proxy),
     ])
