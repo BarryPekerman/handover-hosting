@@ -121,6 +121,20 @@ async def record_finishers():
         await capture_finish(sid, s["ct"])
 
 
+async def sweep_orphans():
+    """Delete any p-* container the spawner isn't tracking. Every legitimate
+    container is either a live session or mid-provision (its sid is in `states`
+    'pending'), so anything else is abandoned — a crash mid-provision, a stale
+    launch, a desync — and would otherwise leak RAM + inotify forever."""
+    live = {"p-" + s[:12] for s in sessions} | {"p-" + s[:12] for s in states}
+    rc, out = await run("incus", "list", "-c", "n", "-f", "csv")
+    for name in out.splitlines():
+        name = name.strip()
+        if name.startswith("p-") and name not in live:
+            log.warning("sweeping orphan container %s", name)
+            await run("incus", "delete", "-f", name)
+
+
 def client_ip(request) -> str:
     # behind Cloudflare the real client is in CF-Connecting-IP; fall back sanely
     return (request.headers.get("CF-Connecting-IP")
@@ -277,6 +291,7 @@ async def reaper(app):
         while True:
             await asyncio.sleep(30)
             await record_finishers()      # capture victories before reaping
+            await sweep_orphans()         # GC containers nobody is tracking
             now = time.time()
             for sid, s in list(sessions.items()):
                 if now - s["last"] > IDLE_SEC:
