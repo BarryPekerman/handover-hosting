@@ -291,6 +291,11 @@ async def provision(sid: str) -> dict | None:
             log.error("container %s never became ready; tearing down", ct)
             await run("incus", "delete", "-f", ct)
             return None
+        # Clean prompt: give every container the same friendly hostname so the
+        # shell shows "levelN@handover" instead of "levelN@p-9f3c…". The random
+        # instance-name hostname reads as noise on a cramped phone screen
+        # (e.g. "level0@p-…" gets misread as "level10").
+        await run("incus", "exec", ct, "--", "hostnamectl", "set-hostname", "handover")
         port = alloc_port()
         proc = await start_ttyd(sid, ct, port)
         now = time.time()
@@ -583,9 +588,18 @@ async def h_ready(request):
     return web.json_response({"state": states.get(sid, "pending")})
 
 
+def owns(request, sid: str) -> bool:
+    """True if this request carries the session cookie for `sid`. The sid is
+    also in the URL, so this binds a terminal to its owner: a leaked /app/<sid>
+    or /t/<sid>/ URL is useless without the matching httponly `hid` cookie."""
+    return request.cookies.get(COOKIE) == sid
+
+
 async def h_app(request):
     sid = request.match_info["sid"]
     if sid not in sessions:          # expired/reset → landing page (Play re-spawns via POST)
+        return web.HTTPFound("/")
+    if not owns(request, sid):       # not your session → back to the start
         return web.HTTPFound("/")
     return web.Response(text=APP.replace("__SID__", sid), content_type="text/html")
 
@@ -599,6 +613,8 @@ async def h_proxy(request):
     s = sessions.get(sid)
     if not s:
         return web.HTTPFound("/")
+    if not owns(request, sid):          # bind the terminal/ws to its owner's cookie
+        return web.HTTPForbidden(text="not your session")
     s["last"] = time.time()
     upstream = f"http://127.0.0.1:{s['port']}{request.rel_url}"
 
