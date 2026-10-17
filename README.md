@@ -73,6 +73,10 @@ rule. Verified: a player container has only `lo`.
 - [x] Instant "spinning up…" spinner (provisions in the background).
 - [x] Browser UX: terminal + a localStorage **notes panel** (survives resets,
       never sent to the server).
+- [x] **Resume:** the browser saves each reached level's password in
+      localStorage; "resume at level N" starts the terminal at the highest
+      saved level whose password matches the container's. Bad entries are
+      dropped; resumed runs are kept off the leaderboard.
 - [x] Ingress: Cloudflare Tunnel (`cloudflared`) → `localhost:8080`; **no inbound
       ports** on the box.
 - [x] DNS: live at **https://play.barrypekerman.com**.

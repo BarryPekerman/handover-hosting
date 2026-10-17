@@ -83,7 +83,10 @@ hand; cloud-init mirrors it).
 - **One shared password set:** every container is a clone of the same golden
   image, so all level passwords are identical across players/sessions. A
   player's "progress" is just the passwords they've collected; any fresh
-  container works when they return.
+  container works when they return. The spawner saves them for the player
+  (`/save/<sid>` → localStorage) and checks them on resume, so rebuilding the
+  image invalidates every save: players see "doesn't match this server" and
+  start from level 0.
 - **Session access is cookie-bound:** `/app/<sid>` and `/t/<sid>/` require the
   httponly `hid` cookie to match the URL sid. Clearing cookies mid-game means
   pressing Play again.
@@ -114,6 +117,16 @@ fail2ban on sshd. Host SSH is key-only.
 - **Seat behaviour under real load** (squatting, cap at 20, 60-min reclaim).
 
 ## Change log
+
+- **2026-10-18** (unreleased; committed, not deployed):
+  - Resume from the browser save (see gotchas). Resumed runs set `unranked` in
+    the leaderboard DB (column added on startup).
+  - Progress check only counts su records with `_EXE=/usr/bin/su`. Before, any
+    player could fake a reach with `logger -t su "session opened for user
+    level20"` and climb the leaderboard. Rows written before this fix may be
+    forged.
+  - `bandit-wannabe` `0f3f868`: plain `mail` shows Dave's note directly
+    (playtester got lost in the mailx prompt). Needs an image rebuild.
 
 - **2026-10-17** (this session):
   - `bandit-wannabe` `9156bad`: removed the dead AWS/EC2/Terraform deploy path;
