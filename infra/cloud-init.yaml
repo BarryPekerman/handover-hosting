@@ -50,11 +50,22 @@ runcmd:
   - netfilter-persistent save
   - usermod -aG incus-admin ubuntu
 
+  # --- storage: a btrfs pool for player containers so we can enforce a per-
+  #     container disk quota. The default 'dir' pool has NO size limit, so a
+  #     player could fill the host disk with many sub-ulimit files. btrfs also
+  #     shares the base image copy-on-write, so N containers cost ~1x rootfs +
+  #     their own write-deltas, not N full copies. Loop-backed, sparse; the
+  #     30GiB cap is the hard host-protecting ceiling. ---
+  - incus storage create games btrfs size=30GiB
+
   # --- isolated profile: NIC-less containers + per-player caps ---
   - incus profile create isolated
-  - incus profile device add isolated root disk pool=default path=/
+  - incus profile device add isolated root disk pool=games path=/ size=2GiB
   - incus profile device add isolated eth0 none
   - incus profile set isolated limits.cpu.allowance=50% limits.memory=512MiB limits.processes=300
+  # Disable the guest API (/dev/incus/sock): the game never uses it and it
+  # otherwise leaks the host instance name into every container.
+  - incus profile set isolated security.guestapi=false
 
   # --- cloudflared (tunnel creds come later via CD, not here) ---
   - bash -c 'curl -fsSL -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb && dpkg -i /tmp/cloudflared.deb'
