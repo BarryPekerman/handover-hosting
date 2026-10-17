@@ -18,7 +18,7 @@ Config via env (all optional):
   TTYD_PORT_BASE=8100    LOGIN_USER=level0
 """
 import asyncio, os, secrets, time, logging, json, sqlite3, html, hmac, hashlib, base64
-from aiohttp import web, ClientSession, WSMsgType, ClientTimeout
+from aiohttp import web, ClientSession, WSMsgType, ClientTimeout, WSCloseCode
 
 LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8080"))
@@ -59,6 +59,7 @@ locks: dict[str, asyncio.Lock] = {}      # per-sid provisioning lock
 states: dict[str, str] = {}              # sid -> "pending"|"full"|"error" (ready == in sessions)
 ip_hits: dict[str, list] = {}            # client IP -> recent provision timestamps (throttle)
 who: dict[str, dict] = {}                # sid -> {"uid": <github id>|None, "display": str}
+live_ws: set = set()                     # open terminal WebSockets, closed on shutdown
 
 
 def db():
@@ -604,26 +605,39 @@ async def h_proxy(request):
     if request.headers.get("Upgrade", "").lower() == "websocket":
         ws_server = web.WebSocketResponse(protocols=("tty",))
         await ws_server.prepare(request)
-        async with ClientSession() as cs:
-            async with cs.ws_connect(upstream, protocols=("tty",)) as ws_up:
-                async def c2s():
-                    async for m in ws_server:
-                        s["last"] = time.time()
-                        if m.type == WSMsgType.TEXT:
-                            await ws_up.send_str(m.data)
-                        elif m.type == WSMsgType.BINARY:
-                            await ws_up.send_bytes(m.data)
-                        else:
-                            break
-                async def s2c():
-                    async for m in ws_up:
-                        if m.type == WSMsgType.TEXT:
-                            await ws_server.send_str(m.data)
-                        elif m.type == WSMsgType.BINARY:
-                            await ws_server.send_bytes(m.data)
-                        else:
-                            break
-                await asyncio.gather(c2s(), s2c(), return_exceptions=True)
+        live_ws.add(ws_server)                    # so on_shutdown can close it
+        try:
+            async with ClientSession() as cs:
+                async with cs.ws_connect(upstream, protocols=("tty",)) as ws_up:
+                    async def c2s():
+                        async for m in ws_server:
+                            s["last"] = time.time()
+                            if m.type == WSMsgType.TEXT:
+                                await ws_up.send_str(m.data)
+                            elif m.type == WSMsgType.BINARY:
+                                await ws_up.send_bytes(m.data)
+                            else:
+                                break
+                    async def s2c():
+                        async for m in ws_up:
+                            if m.type == WSMsgType.TEXT:
+                                await ws_server.send_str(m.data)
+                            elif m.type == WSMsgType.BINARY:
+                                await ws_server.send_bytes(m.data)
+                            else:
+                                break
+                    # Whichever direction ends first (a side closed, or the
+                    # server closed ws_server on shutdown), cancel the other so
+                    # the handler returns instead of hanging on a half-open pipe.
+                    t1 = asyncio.ensure_future(c2s())
+                    t2 = asyncio.ensure_future(s2c())
+                    _, pending = await asyncio.wait(
+                        {t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+                    for t in pending:
+                        t.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
+        finally:
+            live_ws.discard(ws_server)
         return ws_server
 
     # plain HTTP
@@ -738,6 +752,18 @@ async def on_start(app):
     app["reaper"] = asyncio.create_task(reaper(app))
 
 
+async def on_shutdown(app):
+    # Terminal WebSockets are long-lived; aiohttp's graceful shutdown would
+    # otherwise block on them until the systemd stop-timeout SIGKILLs us. Close
+    # them so the proxy handlers return at once. Containers keep running and the
+    # browser's ttyd client auto-reconnects once we're back.
+    for ws in list(live_ws):
+        try:
+            await ws.close(code=WSCloseCode.GOING_AWAY, message=b"server restarting")
+        except Exception:
+            pass
+
+
 async def on_cleanup(app):
     # Non-destructive: cancel the reaper and persist state, but DO NOT delete
     # containers — on_start re-adopts them, so a restart no longer resets players.
@@ -761,9 +787,12 @@ def make_app():
         web.route("*", "/t/{sid}/{tail:.*}", h_proxy),
     ])
     app.on_startup.append(on_start)
+    app.on_shutdown.append(on_shutdown)
     app.on_cleanup.append(on_cleanup)
     return app
 
 
 if __name__ == "__main__":
-    web.run_app(make_app(), host=LISTEN_HOST, port=LISTEN_PORT)
+    # shutdown_timeout is a backstop: even if a socket won't close, give up
+    # fast instead of hanging out the full systemd stop-timeout.
+    web.run_app(make_app(), host=LISTEN_HOST, port=LISTEN_PORT, shutdown_timeout=5.0)
