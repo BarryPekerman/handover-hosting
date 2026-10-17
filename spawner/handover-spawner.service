@@ -8,6 +8,9 @@ User=ubuntu
 ExecStart=/usr/bin/python3 /home/ubuntu/spawner.py
 Restart=on-failure
 RestartSec=2
+# Backstop: the app closes its WebSockets on shutdown and uses a 5s
+# shutdown_timeout, so stop is near-instant; cap it hard regardless.
+TimeoutStopSec=15
 # tuning (override as needed)
 Environment=LISTEN_HOST=127.0.0.1
 Environment=LISTEN_PORT=8080
