@@ -52,6 +52,11 @@ runcmd:
   - sysctl --system    # apply the inotify limits above before anything runs
   - systemctl enable --now fail2ban || true
   - systemctl restart fail2ban || true   # pick up jail.local written above
+  # rpcbind (portmapper, :111) gets pulled in as a dependency but the game uses
+  # no NFS/RPC. It's an unused daemon and a classic DDoS reflection vector, so
+  # turn it off. (It's cloud-firewalled too, but don't run what you don't need.)
+  - systemctl disable --now rpcbind.service rpcbind.socket || true
+  - systemctl mask rpcbind.service rpcbind.socket || true
   # --- Incus ---
   - systemctl enable --now incus || true
   - incus admin init --minimal
