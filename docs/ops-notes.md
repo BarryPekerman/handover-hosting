@@ -55,7 +55,7 @@ journalctl -u handover-spawner -f                     # follow
 sudo systemctl restart handover-spawner
 
 # rebuild the game image (ON THE HOST, aarch64) after game changes land
-cd ~ubuntu/bandit-wannabe && git pull && \
+cd ~ubuntu/bandit-wannabe && git fetch && git reset --hard origin/local-rebuild && \
   PATH=$HOME/.local/bin:$PATH ./scripts/incus-image.sh build   # as ubuntu
 
 # profile / pool config that backs the containers
@@ -64,8 +64,11 @@ incus storage list
 fail2ban-client status sshd
 ```
 
-Deploying spawner changes: `scp spawner/spawner.py ubuntu@$H:/home/ubuntu/` then
-`sudo systemctl restart handover-spawner`. Infra changes go in
+Deploying spawner changes: push to `master`. `.github/workflows/deploy.yml`
+copies `spawner/`, the unit and the tunnel config to the host, writes the
+secrets env file from GitHub Secrets and restarts the spawner. Don't scp by
+hand; the next push would overwrite it anyway. The game image has no CD: build
+it on the host (above). Infra changes go in
 `infra/cloud-init.yaml` for rebuild reproducibility (the live box was built by
 hand; cloud-init mirrors it).
 
