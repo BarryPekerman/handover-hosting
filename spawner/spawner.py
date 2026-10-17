@@ -4,7 +4,9 @@ fronted by a single localhost port (Cloudflare tunnel terminates upstream).
 
 Flow:
   GET  /            landing page with a Play button
-  GET  /play        find-or-create this visitor's container + ttyd, 302 to /t/<sid>/
+  POST /play        find-or-create this visitor's container + ttyd (mode=resume
+                    starts it at the highest level the browser's save proves)
+  GET  /save/<sid>  passwords of the levels reached so far, for the browser's save
   ANY  /t/<sid>/*   reverse-proxy (HTTP + WebSocket) to that session's ttyd
 
 Each session gets a NIC-less container (profile `isolated`, no network device)
@@ -17,7 +19,7 @@ Config via env (all optional):
   MAX_PLAYERS=20         IDLE_MIN=60   MAX_LIFETIME_MIN=1440
   TTYD_PORT_BASE=8100    LOGIN_USER=level0
 """
-import asyncio, os, secrets, time, logging, json, sqlite3, html, hmac, hashlib, base64
+import asyncio, os, re, secrets, time, logging, json, sqlite3, html, hmac, hashlib, base64
 from aiohttp import web, ClientSession, WSMsgType, ClientTimeout, WSCloseCode
 
 LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
@@ -30,6 +32,8 @@ MAX_LIFE    = int(os.environ.get("MAX_LIFETIME_MIN", "1440")) * 60
 PORT_BASE   = int(os.environ.get("TTYD_PORT_BASE", "8100"))
 LOGIN_USER  = os.environ.get("LOGIN_USER", "level0")
 COOKIE      = "hid"
+MAX_RESUME  = 20          # highest level a save can resume at (21 = dave = the win)
+PASS_RE     = re.compile(r"[A-Za-z0-9]{1,64}")
 STATE_FILE  = os.environ.get("STATE_FILE", os.path.expanduser("~/.handover-sessions.json"))
 DB_PATH     = os.environ.get("LEADERBOARD_DB", os.path.expanduser("~/handover-leaderboard.db"))
 RATE_MAX    = int(os.environ.get("RATE_MAX", "5"))       # new containers per IP ...
@@ -60,6 +64,7 @@ states: dict[str, str] = {}              # sid -> "pending"|"full"|"error" (read
 ip_hits: dict[str, list] = {}            # client IP -> recent provision timestamps (throttle)
 who: dict[str, dict] = {}                # sid -> {"uid": <github id>|None, "display": str}
 live_ws: set = set()                     # open terminal WebSockets, closed on shutdown
+resume_req: dict[str, tuple] = {}        # sid -> (saved {level: pass}, server-known level)
 
 
 def db():
@@ -70,6 +75,10 @@ def db():
     c.execute("CREATE TABLE IF NOT EXISTS players "
               "(key TEXT PRIMARY KEY, display TEXT, max_level INTEGER, "
               " accumulated INTEGER, finished INTEGER, updated REAL)")
+    # unranked = resumed past the levels this key actually played, so its total
+    # is missing time and it stays off the leaderboard.
+    if "unranked" not in {r[1] for r in c.execute("PRAGMA table_info(players)")}:
+        c.execute("ALTER TABLE players ADD COLUMN unranked INTEGER DEFAULT 0")
     return c
 
 
@@ -92,7 +101,9 @@ collect() {
   for f in /var/log/wtmp.1 /var/log/wtmp; do
     [ -f "$f" ] && last -f "$f" --time-format iso -w 2>/dev/null | awk '$2 ~ /^pts/ {print $1, $4}'
   done
-  journalctl -q -o short-iso SYSLOG_IDENTIFIER=su --grep 'session opened for user' 2>/dev/null \
+  # _EXE is set by journald, not the sender: without it any player could
+  # `logger -t su "session opened for user level20"` and fake a reach.
+  journalctl -q -o short-iso SYSLOG_IDENTIFIER=su _EXE=/usr/bin/su --grep 'session opened for user' 2>/dev/null \
     | sed -nE 's/^([^ ]+) .*session opened for user ([A-Za-z0-9_]+)\(.*/\2 \1/p'
 }
 declare -A first
@@ -103,6 +114,41 @@ while read -r u when; do
 done < <(collect)
 for idx in "${!first[@]}"; do echo "$idx ${first[$idx]}"; done
 '''
+
+
+async def read_passes(ct: str, levels) -> dict[int, str]:
+    """{level: password} read from the container's /etc/handover_pass, in one
+    exec. Never log the result."""
+    levels = [int(n) for n in levels if 1 <= int(n) <= MAX_RESUME]
+    if not levels:
+        return {}
+    script = ("for n in %s; do printf '%%s ' $n; head -c 64 /etc/handover_pass/level$n "
+              "2>/dev/null | tr -d '\\n'; echo; done" % " ".join(map(str, levels)))
+    rc, out = await run("incus", "exec", ct, "--", "bash", "-c", script)
+    got = {}
+    for ln in out.splitlines():
+        p = ln.split(" ", 1)
+        if len(p) == 2 and p[0].isdigit() and PASS_RE.fullmatch(p[1]):
+            got[int(p[0])] = p[1]
+    return got
+
+
+def parse_save(raw: str) -> dict[int, str]:
+    """The browser's save ({"levels": {"7": "<pass>", ...}}) as {level: pass}.
+    Anything malformed is ignored, not an error: the save lives in the
+    player's browser and may be stale, edited or corrupted."""
+    try:
+        d = json.loads(raw) if raw and len(raw) <= 8192 else {}
+    except ValueError:
+        return {}
+    lv = d.get("levels") if isinstance(d, dict) else None
+    out = {}
+    if isinstance(lv, dict):
+        for k, v in lv.items():
+            if (str(k).isdigit() and 1 <= int(k) <= MAX_RESUME
+                    and isinstance(v, str) and PASS_RE.fullmatch(v)):
+                out[int(k)] = v
+    return out
 
 
 async def push_playtime(ct: str, secs: int):
@@ -130,8 +176,14 @@ async def update_progress(sid: str, ct: str):
         p = ln.split()
         if len(p) == 2 and p[0].isdigit() and p[1].isdigit():
             reaches[int(p[0])] = int(p[1])
+    s = sessions.get(sid)
+    if s is not None:   # remember reached levels' passwords for the browser's save
+        new = [n for n in reaches if n not in s["passes"]]
+        s["passes"].update(await read_passes(ct, new))
     row = player_row(key)
     prev_max, accum, finished = row if row else (0, 0, 0)
+    # Resuming above what this key has played skips those levels' time.
+    unranked = 1 if s is not None and s.get("start", 0) > prev_max else 0
     new_max = max(reaches) if reaches else prev_max
     if reaches and new_max > prev_max:           # new levels completed this poll
         added = 0
@@ -144,12 +196,13 @@ async def update_progress(sid: str, ct: str):
         finished = 1 if new_max >= 21 else finished
         try:
             c = db()
-            c.execute("INSERT INTO players(key,display,max_level,accumulated,finished,updated) "
-                      "VALUES(?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
+            c.execute("INSERT INTO players(key,display,max_level,accumulated,finished,updated,unranked) "
+                      "VALUES(?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
                       "display=excluded.display, max_level=excluded.max_level, "
                       "accumulated=excluded.accumulated, finished=excluded.finished, "
-                      "updated=excluded.updated",
-                      (key, display, new_max, accum, finished, time.time()))
+                      "updated=excluded.updated, "
+                      "unranked=MAX(COALESCE(players.unranked,0), excluded.unranked)",
+                      (key, display, new_max, accum, finished, time.time(), unranked))
             c.commit(); c.close()
         except Exception:
             log.exception("leaderboard write failed")
@@ -246,7 +299,7 @@ def alloc_port() -> int:
 def save_state():
     """Persist sessions (minus the live proc handle) so a restart can re-adopt them."""
     try:
-        data = {sid: {k: s[k] for k in ("ct", "port", "created", "last")}
+        data = {sid: {k: s[k] for k in ("ct", "port", "created", "last", "start")}
                 for sid, s in sessions.items()}
         tmp = STATE_FILE + ".tmp"
         with open(tmp, "w") as f:
@@ -256,15 +309,19 @@ def save_state():
         log.exception("save_state failed")
 
 
-async def start_ttyd(sid: str, ct: str, port: int):
-    """Launch a ttyd bound to loopback that attaches into the container."""
+def login_user(start: int) -> str:
+    return f"level{start}" if start else LOGIN_USER
+
+
+async def start_ttyd(sid: str, ct: str, port: int, user: str):
+    """Launch a ttyd bound to loopback that attaches into the container as `user`."""
     return await asyncio.create_subprocess_exec(
         "ttyd", "-p", str(port), "-i", "127.0.0.1", "-b", f"/t/{sid}",
         # A slightly smaller font buys a few more columns on narrow phone
         # screens (xterm's fit addon derives columns from pixel width / char
         # width) while staying readable on a desktop.
         "-t", "fontSize=13",
-        "-W", "incus", "exec", ct, "--", "su", "-", LOGIN_USER,
+        "-W", "incus", "exec", ct, "--", "su", "-", user,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
 
@@ -296,15 +353,40 @@ async def provision(sid: str) -> dict | None:
         # instance-name hostname reads as noise on a cramped phone screen
         # (e.g. "level0@p-…" gets misread as "level10").
         await run("incus", "exec", ct, "--", "hostnamectl", "set-hostname", "handover")
+        start, drop, note = await choose_start(ct, resume_req.pop(sid, None))
         port = alloc_port()
-        proc = await start_ttyd(sid, ct, port)
+        proc = await start_ttyd(sid, ct, port, login_user(start))
         now = time.time()
-        sessions[sid] = {"ct": ct, "port": port, "proc": proc, "created": now, "last": now}
+        sessions[sid] = {"ct": ct, "port": port, "proc": proc, "created": now, "last": now,
+                         "start": start, "passes": {}, "drop": drop, "note": note}
         save_state()
-        log.info("provisioned sid=%s ct=%s port=%d (%d/%d)", sid[:12], ct, port, len(sessions), MAX_PLAYERS)
+        log.info("provisioned sid=%s ct=%s port=%d start=level%d dropped=%d (%d/%d)",
+                 sid[:12], ct, port, start, len(drop), len(sessions), MAX_PLAYERS)
         # give ttyd a moment to bind
         await asyncio.sleep(0.5)
         return sessions[sid]
+
+
+async def choose_start(ct: str, req) -> tuple[int, list, str]:
+    """Pick the level to resume at: the highest saved level whose password
+    matches this container's (so a save can't be forged without the password),
+    or the signed-in player's recorded level, whichever is higher. Returns
+    (start, saved levels that didn't match, message for the player)."""
+    if not req:
+        return 0, [], ""
+    saved, srv = req
+    real = await read_passes(ct, saved) if saved else {}
+    good = [n for n, p in saved.items() if n in real and hmac.compare_digest(p, real[n])]
+    drop = sorted(n for n in saved if n not in good)
+    start = max(good + [srv])
+    if start:
+        note = f"resumed at level {start}"
+    elif drop:
+        note = ("your saved progress doesn't match this server (it may have been "
+                "rebuilt) - starting from level 0")
+    else:
+        note = ""
+    return start, drop, note
 
 
 async def provision_bg(sid: str):
@@ -369,11 +451,23 @@ p{max-width:34rem;line-height:1.5;padding:0 1rem}
 <h1>THE HANDOVER</h1>
 <p>Dave quit &mdash; won the lottery &mdash; and left you his server. He left mail, too.
 A browser terminal is all you need. Type <code>mail</code> to start.</p>
-<p style="opacity:.75;font-size:.95rem">Tip: <b>save every password you find</b> &mdash; there's a notes panel beside the
-terminal. Your session can reset; the passwords are how you pick back up.</p>
-<form method="post" action="/play">__TS_WIDGET__<br><button class=play type=submit>&gt; play</button></form>
+<p style="opacity:.75;font-size:.95rem">Your progress saves in this browser as you play. If your
+session resets, come back here and resume.</p>
+<form method="post" action="/play">__TS_WIDGET__<input type=hidden name=save id=save><br>
+<button class=play type=submit name=mode value=resume id=resume hidden></button><br>
+<button class=play type=submit name=mode value=fresh id=fresh>&gt; play</button></form>
 <p style="margin-top:1.5rem"><a href="/leaderboard" style="color:#33ff66;opacity:.8">leaderboard &rarr;</a></p>
 <p style="opacity:.8;font-size:.9rem">__SIGNIN__</p>
+<script>__SAVE_JS__
+(function(){
+  var lv=loadSave(),n=Math.max(topLevel(lv),__SRV__);
+  if(!n)return;
+  var r=document.getElementById('resume');
+  r.hidden=false;r.textContent='> resume at level '+n;
+  document.getElementById('fresh').textContent='> start from level 0';
+  document.getElementById('save').value=JSON.stringify({levels:lv});
+})();
+</script>
 </body></html>"""
 
 FULL = """<!doctype html><html><head><meta charset=utf-8><title>Server full</title>
@@ -445,6 +539,18 @@ poll();
 </script>
 </body></html>"""
 
+# The browser's save: {"v":1,"levels":{"<n>":"<password>"}} in localStorage.
+# Read defensively - a hand-edited or corrupted save just loses the bad entries.
+SAVE_JS = r"""var SAVE_KEY='handover-save';
+function loadSave(){var lv={};
+  try{var d=JSON.parse(localStorage.getItem(SAVE_KEY));
+    if(d&&d.levels&&typeof d.levels==='object')for(var k in d.levels){var v=d.levels[k];
+      if(/^([1-9]|1[0-9]|20)$/.test(k)&&typeof v==='string'&&/^[A-Za-z0-9]{1,64}$/.test(v))lv[k]=v;}
+  }catch(e){}
+  return lv;}
+function storeSave(lv){try{localStorage.setItem(SAVE_KEY,JSON.stringify({v:1,levels:lv}));}catch(e){}}
+function topLevel(lv){var m=0;for(var k in lv)m=Math.max(m,+k);return m;}"""
+
 APP = """<!doctype html><html><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>The Handover</title><style>
@@ -462,6 +568,8 @@ font-family:monospace;font-size:.85rem;line-height:1.5;resize:none;outline:none}
 #toggle{position:fixed;top:.4rem;right:.4rem;z-index:10;background:#021;color:#33ff66;
 border:1px solid #0a3;padding:.35rem .7rem;cursor:pointer;font-family:monospace;display:none}
 .hidden{display:none!important}
+#toast{position:fixed;top:.6rem;left:50%;transform:translateX(-50%);z-index:20;
+background:#021;border:1px solid #33ff66;padding:.5rem .9rem;max-width:90vw;transition:opacity .6s}
 @media(max-width:700px){
   #notes{position:fixed;top:0;right:0;height:100vh;width:82vw;max-width:none;z-index:9;
     box-shadow:-8px 0 24px #000}
@@ -470,10 +578,10 @@ border:1px solid #0a3;padding:.35rem .7rem;cursor:pointer;font-family:monospace;
 </style></head><body>
 <iframe id=term src="/t/__SID__/" title="terminal"></iframe>
 <aside id=notes>
-  <h3><b>your notes</b> <span>saved in this browser</span></h3>
-  <textarea id=pad spellcheck=false placeholder="Save each password here as you find it.
+  <h3><b>your notes</b> <span id=st>saved in this browser</span></h3>
+  <textarea id=pad spellcheck=false placeholder="Your progress saves automatically. Jot down anything else worth remembering.
 
-Stays in your browser &mdash; survives a session reset, never sent to the server."></textarea>
+Stays in your browser &mdash; never sent to the server."></textarea>
 </aside>
 <button id=toggle>notes</button>
 <script>
@@ -483,6 +591,25 @@ try{pad.value=localStorage.getItem(KEY)||'';}catch(e){}
 pad.addEventListener('input',function(){try{localStorage.setItem(KEY,pad.value);}catch(e){}});
 tg.addEventListener('click',function(){notes.classList.toggle('hidden');});
 if(matchMedia('(max-width:700px)').matches)notes.classList.add('hidden');
+__SAVE_JS__
+var st=document.getElementById('st'),noted=false;
+function toast(t){var d=document.createElement('div');d.id='toast';d.textContent=t;
+  document.body.appendChild(d);setTimeout(function(){d.style.opacity=0;},5000);
+  setTimeout(function(){d.remove();},6000);}
+function sync(){
+  fetch('/save/__SID__',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;})
+  .then(function(j){
+    if(!j)return;
+    var lv=loadSave();
+    (j.drop||[]).forEach(function(n){delete lv[n];});
+    for(var k in j.levels)lv[k]=j.levels[k];
+    storeSave(lv);
+    var n=topLevel(lv);
+    st.textContent=n?'progress saved: level '+n:'saved in this browser';
+    if(j.note&&!noted){noted=true;toast(j.note);}
+  }).catch(function(){});
+}
+sync();setInterval(sync,20000);
 </script>
 </body></html>"""
 
@@ -502,8 +629,7 @@ async def h_landing(request):
         if row and row[2]:
             resume = " &middot; you finished &#127881;"
         elif row and row[0] and row[0] > 0:
-            lvl = min(row[0], 20)
-            resume = f' &middot; you reached level {lvl} &mdash; <code>go {lvl}</code> to resume'
+            resume = f" &middot; you reached level {min(row[0], MAX_RESUME)}"
         signin = (f'signed in as {html.escape(disp)}{resume} &middot; '
                   '<a href="/logout" style="color:#33ff66">log out</a>')
     elif oauth_ready():
@@ -513,8 +639,16 @@ async def h_landing(request):
         signin = ""
     page = (LANDING.replace("__TS_SCRIPT__", script)
                    .replace("__TS_WIDGET__", widget)
-                   .replace("__SIGNIN__", signin))
+                   .replace("__SIGNIN__", signin)
+                   .replace("__SAVE_JS__", SAVE_JS)
+                   .replace("__SRV__", str(server_level(uid))))
     return web.Response(text=page, content_type="text/html")
+
+
+def server_level(uid) -> int:
+    """The level a signed-in player has reached, from the leaderboard DB."""
+    row = player_row(uid) if uid else None
+    return min(row[0], MAX_RESUME) if row and row[0] else 0
 
 
 async def verify_turnstile(token: str, ip: str) -> bool:
@@ -553,9 +687,9 @@ async def h_play(request):
         resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", path="/", max_age=MAX_LIFE)
         return resp
     ip = client_ip(request)
+    form = await request.post()
     # bot check before we spend a container (no-op until the secret is configured)
     if TS_SECRET:
-        form = await request.post()
         if not await verify_turnstile(form.get("cf-turnstile-response", ""), ip):
             return web.Response(text=TS_FAIL, content_type="text/html", status=403)
     # new container: throttle per real client IP so one source can't take all seats
@@ -565,6 +699,8 @@ async def h_play(request):
     uid, disp = identity(request)
     who[sid] = {"uid": uid, "display": disp}
     if sid not in sessions and states.get(sid) != "pending":
+        if form.get("mode") == "resume":
+            resume_req[sid] = (parse_save(form.get("save", "")), server_level(uid))
         states[sid] = "pending"
         asyncio.create_task(provision_bg(sid))
     resp = web.Response(text=SPAWNING.replace("__SID__", sid), content_type="text/html")
@@ -601,7 +737,21 @@ async def h_app(request):
         return web.HTTPFound("/")
     if not owns(request, sid):       # not your session → back to the start
         return web.HTTPFound("/")
-    return web.Response(text=APP.replace("__SID__", sid), content_type="text/html")
+    return web.Response(text=APP.replace("__SAVE_JS__", SAVE_JS).replace("__SID__", sid),
+                        content_type="text/html")
+
+
+async def h_save(request):
+    """Passwords of the levels reached in this session, for the browser's save,
+    plus saved levels that failed to verify at resume (the browser drops them)."""
+    sid = request.match_info["sid"]
+    s = sessions.get(sid)
+    if not s or not owns(request, sid):
+        return web.json_response({}, status=404)
+    return web.json_response(
+        {"levels": {str(k): v for k, v in s["passes"].items()},
+         "drop": s["drop"], "note": s["note"]},
+        headers={"Cache-Control": "no-store"})
 
 
 HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -675,7 +825,8 @@ async def h_leaderboard(request):
     try:
         c = db()
         rows = c.execute("SELECT display, accumulated FROM players "
-                         "WHERE finished=1 ORDER BY accumulated ASC LIMIT 50").fetchall()
+                         "WHERE finished=1 AND COALESCE(unranked,0)=0 "
+                         "ORDER BY accumulated ASC LIMIT 50").fetchall()
         c.close()
     except Exception:
         log.exception("leaderboard read failed")
@@ -759,9 +910,11 @@ async def on_start(app):
         rc, _ = await run("incus", "exec", s["ct"], "--", "true")
         if rc != 0:
             continue  # container is gone; drop it
-        proc = await start_ttyd(sid, s["ct"], s["port"])
+        start = s.get("start", 0)
+        proc = await start_ttyd(sid, s["ct"], s["port"], login_user(start))
         sessions[sid] = {"ct": s["ct"], "port": s["port"], "proc": proc,
-                         "created": s.get("created", time.time()), "last": time.time()}
+                         "created": s.get("created", time.time()), "last": time.time(),
+                         "start": start, "passes": {}, "drop": [], "note": ""}
     if sessions:
         log.info("re-adopted %d live session(s) after restart", len(sessions))
     save_state()
@@ -795,6 +948,7 @@ def make_app():
         web.get("/play", h_play_get),   # a GET never spawns
         web.get("/ready", h_ready),
         web.get("/app/{sid}", h_app),
+        web.get("/save/{sid}", h_save),
         web.get("/leaderboard", h_leaderboard),
         web.get("/login", h_login),
         web.get("/auth/callback", h_callback),
