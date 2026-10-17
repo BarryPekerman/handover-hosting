@@ -15,7 +15,7 @@ TimeoutStopSec=15
 Environment=LISTEN_HOST=127.0.0.1
 Environment=LISTEN_PORT=8080
 Environment=MAX_PLAYERS=20
-Environment=IDLE_MIN=240
+Environment=IDLE_MIN=60
 Environment=MAX_LIFETIME_MIN=1440
 # Turnstile sitekey is public, safe in git. The secret goes in the env file
 # below (host-only, git-ignored); the leading '-' means "optional, don't fail

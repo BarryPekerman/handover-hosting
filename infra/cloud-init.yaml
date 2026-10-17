@@ -19,6 +19,10 @@ packages:
   - pipx
   - python3-venv
   - iptables-persistent
+  # Ban hosts that hammer SSH. The host is key-only so this isn't about
+  # stopping credential brute-force (there's nothing to guess); it caps the
+  # log noise and connection churn from the constant internet background scan.
+  - fail2ban
 
 write_files:
   - path: /etc/profile.d/handover-build.sh
@@ -33,9 +37,21 @@ write_files:
     content: |
       fs.inotify.max_user_instances = 1024
       fs.inotify.max_user_watches = 524288
+  # fail2ban: watch sshd, ban an IP for an hour after 5 failures in 10 min.
+  - path: /etc/fail2ban/jail.local
+    permissions: "0644"
+    content: |
+      [sshd]
+      enabled  = true
+      backend  = systemd
+      maxretry = 5
+      findtime = 10m
+      bantime  = 1h
 
 runcmd:
   - sysctl --system    # apply the inotify limits above before anything runs
+  - systemctl enable --now fail2ban || true
+  - systemctl restart fail2ban || true   # pick up jail.local written above
   # --- Incus ---
   - systemctl enable --now incus || true
   - incus admin init --minimal
