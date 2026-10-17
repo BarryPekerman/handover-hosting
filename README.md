@@ -19,12 +19,19 @@ image; this project only does hosting.
   ```
 - The game image present as alias `handover` (built by `bandit-wannabe/scripts/incus-image.sh build` on this ARM host).
 - `ttyd` (>=1.7, past the old CVE) and `python3-aiohttp`.
-- The `isolated` profile (NIC-less + per-player caps):
+- A `games` btrfs storage pool so player containers get a per-container disk
+  quota (the `dir` pool can't; btrfs also CoW-shares the base image):
+  ```
+  incus storage create games btrfs size=30GiB
+  ```
+- The `isolated` profile (NIC-less + per-player CPU/mem/proc/disk caps, guest
+  API off so the host name doesn't leak into containers):
   ```
   incus profile create isolated
-  incus profile device add isolated root disk pool=default path=/
+  incus profile device add isolated root disk pool=games path=/ size=2GiB
   incus profile device add isolated eth0 none
   incus profile set isolated limits.cpu.allowance=50% limits.memory=512MiB limits.processes=300
+  incus profile set isolated security.guestapi=false
   ```
 
 ## Spawner
