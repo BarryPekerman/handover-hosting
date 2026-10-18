@@ -1,0 +1,22 @@
+#!/bin/bash
+# Stand-in for `incus` while testing the spawner against bandit-wannabe's
+# Vagrant VM: every "container" is that VM. launch/delete are no-ops; the live
+# image is the fingerprint in $STATE/fp (change it to simulate an image deploy).
+STATE=${HANDOVER_VM_STATE:?}
+SSHCFG=${HANDOVER_VM_SSH_CONFIG:?}
+case "$1" in
+  launch) cat "$STATE/fp" > "$STATE/base-$3"; exit 0 ;;
+  delete|list) exit 0 ;;
+  image) echo "Fingerprint: $(cat "$STATE/fp")"; exit 0 ;;
+  config) cat "$STATE/base-$3"; exit 0 ;;
+  exec) shift; shift; envs=()
+    while [ "$1" != -- ]; do if [ "$1" = --env ]; then envs+=("$2"); shift 2; else shift; fi; done; shift
+    [ ${#envs[@]} -gt 0 ] && set -- env "${envs[@]}" "$@"
+    case "$1" in systemctl) echo running; exit 0 ;; hostnamectl) exit 0 ;; esac
+    if [ -t 0 ]; then   # terminal session (ttyd): single-line args, plain quoting is safe
+      exec ssh -F "$SSHCFG" -o LogLevel=ERROR -tt handover "sudo $(printf '%q ' "$@")"
+    fi
+    # Scripts may span lines; ship argv as NUL-separated base64.
+    a=$(printf "%s\0" "$@" | base64 -w0)
+    exec ssh -F "$SSHCFG" -o LogLevel=ERROR handover "echo $a | base64 -d | sudo xargs -0 env --" ;;
+esac

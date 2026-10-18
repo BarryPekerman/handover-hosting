@@ -22,7 +22,9 @@
         security.guestapi: "false"
       devices:
         eth0: { type: none }        # no NIC: isolation by absence
-        root: { path: /, pool: games, size: 2GiB, type: disk }
+        # ~70 MiB used per player in practice (btrfs shares the image); 20 x 1 GiB
+        # fits the 30 GiB pool, so a full house of full quotas cannot fill it.
+        root: { path: /, pool: games, size: 1GiB, type: disk }
 
   handlers:
     - name: Apply sysctls

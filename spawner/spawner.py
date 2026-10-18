@@ -215,6 +215,13 @@ def solve_time(reaches: dict[int, int], prev_max: int, new_max: int) -> int:
     return added
 
 
+def skipped_levels(reaches: dict[int, int], prev_max: int, new_max: int) -> bool:
+    """True if a level between prev_max and new_max has no recorded login: the
+    account jumped ahead (passwords are shared, so knowing Dave's is enough to
+    "finish" in 0 s), and its time is missing those levels."""
+    return any(i not in reaches for i in range(prev_max, new_max + 1))
+
+
 def save_progress(key: str, display: str, max_level: int, accum: int,
                   finished: int, unranked: int):
     try:
@@ -253,8 +260,10 @@ async def update_progress(sid: str, ct: str):
         added = solve_time(reaches, prev_max, new_max)
         accum += added
         finished = 1 if new_max >= WIN_INDEX else finished
-        # Resuming above what this key has played skips those levels' time.
-        unranked = 1 if s is not None and s.get("start", 0) > prev_max else 0
+        # Resuming above what this key has played, or jumping past levels,
+        # leaves those levels' time out, so the run can't be ranked.
+        resumed_past = s is not None and s.get("start", 0) > prev_max
+        unranked = 1 if resumed_past or skipped_levels(reaches, prev_max, new_max) else 0
         save_progress(key, info["display"], new_max, accum, finished, unranked)
         log.info("progress key=%s max=%d +%ds total=%ds fin=%d", key[:16], new_max, added, accum, finished)
     # The container is network-less and can't read the DB, so hand it the total.
