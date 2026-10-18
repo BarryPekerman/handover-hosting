@@ -52,7 +52,7 @@ what's done when it's done.
 - [x] **5a. Disk overcommit:** measured ~70 MiB per player; quota now 1 GiB (deployed). 20 seats × 2 GiB quota = 40 GiB on a 30 GiB pool.
   Measure real per-container usage, then size the pool or the quota so they fit.
 - [~] **5b. Leaderboard audit:** found a 0-second finish (straight to `dave`); runs that skip levels are now unranked (deployed). Old bogus row: pending decision. rows written before the `_EXE` fix may be forged.
-- [ ] **5c. One branch:** retire bandit-wannabe's `local-rebuild`; work on `main`.
+- [x] **5c. One branch:** done; `local-rebuild` deleted, bandit-wannabe works on `main`.
 
 ## 6. Monitoring (separate phase)
 
