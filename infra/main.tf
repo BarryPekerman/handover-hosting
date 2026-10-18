@@ -81,7 +81,10 @@ resource "oci_core_instance" "handover" {
 
   metadata = {
     ssh_authorized_keys = var.ssh_public_key
-    user_data           = base64encode(file("${path.module}/cloud-init.yaml"))
+    user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
+      tunnel_token        = data.cloudflare_zero_trust_tunnel_cloudflared_token.handover.token
+      cloudflared_version = "2026.10.1" # keep in step with host/site.yml
+    }))
   }
 
   # Free A1 capacity is scarce: never let a plan silently destroy/replace the

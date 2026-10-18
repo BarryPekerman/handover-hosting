@@ -58,7 +58,7 @@ what's done when it's done.
 
 ## 7. Rebuildability
 
-- [ ] **7a. Tunnel at first boot.** With port 22 closed, a fresh box can't be
+- [x] **7a. Tunnel at first boot.** Done: `infra/cloud-init.yaml.tftpl` starts `cloudflared-tf` from the token (untested until a rebuild drill). Original note: With port 22 closed, a fresh box can't be
   reached to install the tunnel. Store the tunnel's token as a sensitive TFC
   variable; cloud-init installs cloudflared and runs it, so CI can reach a new
   box straight away.

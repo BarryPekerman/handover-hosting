@@ -1,8 +1,10 @@
 # infra — Terraform + cloud-init for the Handover host
 
 Describes the OCI box as code: a VM.Standard.A1.Flex (4 OCPU / 24 GB) running
-Ubuntu 24.04. `cloud-init.yaml` only updates packages on first boot; the host
-is configured by `../host/site.yml`, which `deploy.yml` applies, followed by
+Ubuntu 24.04. `cloud-init.yaml.tftpl` (rendered by Terraform with the tunnel's
+run token) updates packages and starts the tunnel connector on first boot, so
+a new box is reachable through `handover-ssh` with port 22 closed; the host is
+configured by `../host/site.yml`, which `deploy.yml` applies, followed by
 bandit-wannabe's `deploy-image` for the game image. **No secrets and no game
 build live here.**
 
@@ -66,7 +68,7 @@ gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<late
 
 ## What's still manual / TODO
 
-- **A fresh box can't be reached** until its tunnel connector runs, and only
-  deploy.yml starts it (port 22 is closed). Until cloud-init starts it from the
-  token (hardening-plan 7a), use the break-glass in docs/ops-notes.md.
+- A fresh box's first boot is untested end to end (cloud-init starts the
+  tunnel connector from the token, so CI can reach it through handover-ssh);
+  a rebuild drill would prove it.
 - cloud-init wants one real boot to confirm ordering/timing.
