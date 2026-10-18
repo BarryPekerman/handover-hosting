@@ -1,7 +1,20 @@
-variable "oci_profile" {
-  description = "Profile in ~/.oci/config to auth with"
+# Auth for tf-handover; set as workspace variables in Terraform Cloud.
+variable "tenancy_ocid" {
+  type = string
+}
+
+variable "user_ocid" {
+  type = string
+}
+
+variable "fingerprint" {
+  type = string
+}
+
+variable "private_key" {
+  description = "PEM of tf-handover's API key"
   type        = string
-  default     = "ALEX"
+  sensitive   = true
 }
 
 variable "region" {
@@ -10,7 +23,7 @@ variable "region" {
 }
 
 variable "compartment_ocid" {
-  description = "Compartment to create the instance in (the tenancy root here)"
+  description = "Compartment the instance lives in (`handover`)"
   type        = string
 }
 
@@ -24,10 +37,9 @@ variable "subnet_ocid" {
   type        = string
 }
 
-variable "ssh_public_key_path" {
-  description = "Public key placed in the instance's authorized_keys"
+variable "ssh_public_key" {
+  description = "Public key placed in the instance's authorized_keys (only used at creation)"
   type        = string
-  default     = "~/.ssh/alex_handover.pub"
 }
 
 variable "display_name" {

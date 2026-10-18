@@ -13,13 +13,23 @@ Terraform won't touch the existing network. Only the instance is managed.
 
 ## Setup
 
-```sh
-cd infra
-cp terraform.tfvars.example terraform.tfvars   # values are prefilled
-export SUPPRESS_LABEL_WARNING=True
-terraform init
-terraform plan                                  # read-only; review first
-```
+State and runs live in **Terraform Cloud**: org `Berries-`, project `handover`,
+workspace `handover-infra` (remote execution, working directory `infra`).
+Terraform authenticates as **`tf-handover`**, an API-key-only OCI user in group
+`handover-terraform`. Its policy (`handover-terraform`) allows managing
+instances and boot volumes in compartment **`handover`**, and using the
+tenancy's one subnet. Nothing else: no IAM, no network changes, nothing outside
+the compartment. Its key and the OCIDs are workspace variables, so nothing
+here needs `~/.oci` or `~/.ssh`.
+
+Runs go through GitHub (`.github/workflows/terraform.yml`):
+
+- a PR touching `infra/` gets a speculative plan;
+- `gh workflow run terraform.yml -R BarryPekerman/handover-hosting` plans and,
+  if there are changes, applies. Starting it is the approval.
+
+`terraform plan` from a laptop also works (`terraform login` first); it runs
+remotely in the same workspace.
 
 ## Two paths
 
@@ -57,6 +67,4 @@ gh workflow run deploy.yml --repo BarryPekerman/handover-hosting
 
 - **Tunnel credentials** for a fresh box: either reuse the existing tunnel's
   creds (add to GitHub Secrets and have CD write them) or create a new tunnel.
-- **Remote state**: move off local state (OCI Object Storage or TF Cloud) before
-  this is more than one person.
 - cloud-init wants one real boot to confirm ordering/timing.
