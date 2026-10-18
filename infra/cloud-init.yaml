@@ -12,7 +12,6 @@
 #   2. gh workflow run deploy.yml -R BarryPekerman/handover-hosting
 #      (host config + spawner; Incus has to exist before an image can land)
 #   3. gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<latest passing ci on main>
-#   Tunnel credentials for a fresh box are still a manual step (infra/README.md).
 package_update: true
 package_upgrade: true
 final_message: "Handover host up. Run deploy.yml (host config + spawner), then deploy-image."

@@ -22,7 +22,7 @@ what's done when it's done.
 
 ## 2. Things that only exist on the host
 
-- [x] **2a. Nightly backup** (done: `backup.yml`; restore tested) of the leaderboard DB and the tunnel credentials:
+- [x] **2a. Nightly backup** (done: `backup.yml`; restore tested) of the leaderboard DB (the tunnel files dropped out when the tunnel moved to Terraform):
   a scheduled workflow pulls them over SSH, encrypts them with a passphrase
   secret, and keeps them as a private artifact (30 days).
   *Done when:* a run produces an artifact and a restore of it is tested.
@@ -62,11 +62,11 @@ what's done when it's done.
   reached to install the tunnel. Store the tunnel's token as a sensitive TFC
   variable; cloud-init installs cloudflared and runs it, so CI can reach a new
   box straight away.
-- [ ] **7b. Cloudflare as code.** Tunnel, DNS records, the Access app, its two
+- [x] **7b. Cloudflare as code.** Done: DNS, Access app + policies, Turnstile imported; tunnel `handover-tf` made in Terraform and the old one removed. Left: the hand-made service token (phase 3). Original note: Tunnel, DNS records, the Access app, its two
   policies and the service token were created by hand; the Cloudflare
   Terraform provider (with an API token in TFC) would make a from-scratch
   rebuild `terraform apply` plus the deploys.
-- [ ] **7c. Rotate the `handover-ci` service token** (its secret went through a
+- [x] **7c. Rotate the `handover-ci` service token** (done; old secret verified refused) (its secret went through a
   chat), then set the new one in both repos from a terminal.
 
 ## 6. Monitoring (separate phase)

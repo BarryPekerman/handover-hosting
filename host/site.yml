@@ -40,12 +40,6 @@
         name: fail2ban
         state: restarted
 
-    - name: Restart cloudflared
-      ansible.builtin.systemd:
-        name: cloudflared-handover
-        state: restarted
-        daemon_reload: true
-
     - name: Reload systemd
       ansible.builtin.systemd:
         daemon_reload: true
@@ -67,7 +61,7 @@
     - name: Cloudflared (pinned)
       ansible.builtin.apt:
         deb: "https://github.com/cloudflare/cloudflared/releases/download/{{ cloudflared_version }}/cloudflared-linux-arm64.deb"
-      notify: Restart cloudflared
+      notify: Restart tunnel connector
 
     # Every nested `ssh levelN@localhost` starts a systemd user manager; the
     # stock 128 inotify instances run out by about level 2. ptrace_scope and
@@ -219,21 +213,28 @@
         daemon_reload: true
       when: tunnel_token | length > 0
 
-    - name: Cloudflared tunnel config
-      ansible.builtin.copy:
-        src: ../cloudflared/config.yml
-        dest: /home/ubuntu/.cloudflared/config.yml
-        owner: ubuntu
-        group: ubuntu
-        mode: "0644"
-      notify: Restart cloudflared
+    # The old file-configured tunnel (replaced by handover-tf on 2026-10-18):
+    # its connector, config, credentials and the account-level cert.pem go.
+    - name: Look for the old tunnel connector
+      ansible.builtin.stat:
+        path: /etc/systemd/system/cloudflared-handover.service
+      register: old_connector
 
-    - name: Cloudflared unit
-      ansible.builtin.copy:
-        src: ../cloudflared/cloudflared-handover.service
-        dest: /etc/systemd/system/cloudflared-handover.service
-        mode: "0644"
-      notify: Restart cloudflared
+    - name: Old tunnel connector off
+      ansible.builtin.systemd:
+        name: cloudflared-handover
+        state: stopped
+        enabled: false
+      when: old_connector.stat.exists
+
+    - name: Old tunnel files removed
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/cloudflared-handover.service
+        - /home/ubuntu/.cloudflared
+      notify: Reload systemd
 
     # deploy.yml restarts the spawner after copying its code.
     - name: Spawner unit
@@ -299,4 +300,4 @@
       ansible.builtin.systemd:
         name: "{{ item }}"
         enabled: true
-      loop: [incus, cloudflared-handover, handover-spawner]
+      loop: [incus, handover-spawner]

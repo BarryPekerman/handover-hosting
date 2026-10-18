@@ -66,6 +66,7 @@ gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<late
 
 ## What's still manual / TODO
 
-- **Tunnel credentials** for a fresh box: either reuse the existing tunnel's
-  creds (add to GitHub Secrets and have CD write them) or create a new tunnel.
+- **A fresh box can't be reached** until its tunnel connector runs, and only
+  deploy.yml starts it (port 22 is closed). Until cloud-init starts it from the
+  token (hardening-plan 7a), use the break-glass in docs/ops-notes.md.
 - cloud-init wants one real boot to confirm ordering/timing.

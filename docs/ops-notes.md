@@ -22,8 +22,11 @@ top. Not player-facing.
   TCP 22 from your IP; then `ssh -i ~/.ssh/alex_handover ubuntu@<ip>`; remove
   the rule afterwards.
 - **Serving path:** browser → Cloudflare (DNS is Cloudflare-only; origin IP not
-  in DNS) → **Cloudflare Tunnel** (`cloudflared`, outbound) → spawner on
-  `127.0.0.1:8080`. Nothing is open inbound on the origin, SSH included.
+  in DNS) → **Cloudflare Tunnel** `handover-tf` (`cloudflared-tf.service`,
+  outbound) → spawner on `127.0.0.1:8080`. The tunnel and its routes are
+  Terraform (`infra/tunnel.tf`); the host holds only the run token
+  (`/etc/cloudflared/handover-tf.env`). Nothing is open inbound on the origin,
+  SSH included.
 - **Spawner:** `spawner.py` (aiohttp), systemd unit `handover-spawner`
   (`/etc/systemd/system/handover-spawner.service`, runs as `ubuntu`,
   `ExecStart=/home/ubuntu/spawner.py`). One per-player **Incus** container
@@ -86,8 +89,9 @@ fail2ban-client status sshd
 
 Deploying spawner changes: `gh workflow run deploy.yml` (manual = the approval;
 pushes to `master` only run `ci.yml`). `.github/workflows/deploy.yml`
-copies `spawner/`, the unit and the tunnel config to the host, writes the
-secrets env file from GitHub Secrets and restarts the spawner. Don't scp by
+applies `host/site.yml` (with the tunnel's run token from `CF_TUNNEL_TOKEN`),
+copies `spawner/`, writes the secrets env file from GitHub Secrets and restarts
+the spawner. Don't scp by
 hand. The game image ships the same way from bandit-wannabe: a `ci` run on
 `main` builds and tests it, then
 `gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<id>`
@@ -107,16 +111,14 @@ players, otherwise it waits for the next night. Decision without rebooting:
 
 ## Backups
 
-`backup.yml` runs nightly (02:17 UTC): the leaderboard DB and `~/.cloudflared`,
-encrypted with `BACKUP_PASSPHRASE` (a copy is in `~/handover-backup-passphrase.txt`
+`backup.yml` runs nightly (02:17 UTC): the leaderboard DB, encrypted with `BACKUP_PASSPHRASE` (a copy is in `~/handover-backup-passphrase.txt`
 on the admin laptop), kept 30 days as the `handover-backup` artifact. Restore:
 
 ```bash
 gh run download <run> -R BarryPekerman/handover-hosting -n handover-backup
 gpg --pinentry-mode loopback --passphrase-file ~/handover-backup-passphrase.txt \
   -d handover-backup-*.tgz.gpg | tar xzf - -C restore/
-scp restore/handover-leaderboard.db ubuntu@$H:~/          # spawner stopped
-scp -r restore/cloudflared/. ubuntu@$H:~/.cloudflared/
+scp restore/handover-leaderboard.db handover:~/          # spawner stopped
 ```
 
 The live level passwords are not in it (they're the `HANDOVER_CREDENTIALS`
@@ -188,6 +190,10 @@ which it ignores.)
     follows their GitHub account across devices.
   - MOTD no longer shows a pager hint.
   - Host config is `host/site.yml` (applied by deploy.yml); tmux shared screen.
+  - Cloudflare in Terraform: DNS, Access app + policies, Turnstile imported;
+    a Terraform-made tunnel `handover-tf` replaced the file-configured one
+    (switched with both up, then the old tunnel, its connector and the host's
+    account-level `cert.pem` were removed).
   - SSH moved behind the tunnel + Cloudflare Access; public port 22 closed;
     CI uses the `handover-ci` service token (shared `tunnel-ssh` action).
   - Static-analysis pass (ruff, pylint, vulture, radon, actionlint, zizmor,
