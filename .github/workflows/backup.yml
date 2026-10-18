@@ -1,0 +1,56 @@
+name: backup
+
+# Nightly copy of what exists only on the host: the leaderboard DB and the
+# Cloudflare tunnel credentials (~/.cloudflared, which includes the account
+# cert). Encrypted with BACKUP_PASSPHRASE before it leaves the runner, kept as
+# a private artifact for 30 days. Restore: docs/ops-notes.md.
+on:
+  schedule:
+    - cron: "17 2 * * *"     # 02:17 UTC, a quiet hour
+  workflow_dispatch:
+
+concurrency: backup
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    env:
+      HOST: ${{ secrets.DEPLOY_HOST }}
+    steps:
+      - name: Set up SSH to the host
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id
+          chmod 600 ~/.ssh/id
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      # sqlite's backup API gives a consistent copy while the spawner writes.
+      - name: Collect and encrypt
+        env:
+          PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          umask 077
+          ssh -i ~/.ssh/id ubuntu@"$HOST" 'set -euo pipefail
+            d=$(mktemp -d); trap "rm -rf $d" EXIT
+            python3 -c "import sqlite3, sys; s = sqlite3.connect(sys.argv[1]); t = sqlite3.connect(sys.argv[2]); s.backup(t); t.close()" \
+              ~/handover-leaderboard.db "$d/handover-leaderboard.db"
+            cp -a ~/.cloudflared "$d/cloudflared"
+            tar czf - -C "$d" .' > backup.tgz
+          tar tzf backup.tgz > /dev/null
+          echo "archive: $(stat -c %s backup.tgz) bytes, $(tar tzf backup.tgz | grep -vc '/$') files"
+          printf '%s' "$PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 -o "handover-backup-$(date -u +%F).tgz.gpg" backup.tgz
+          shred -u backup.tgz
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: handover-backup
+          path: handover-backup-*.tgz.gpg
+          retention-days: 30
+          if-no-files-found: error
