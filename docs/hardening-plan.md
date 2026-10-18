@@ -13,7 +13,7 @@ what's done when it's done.
   token and remove the old workspace and key.
   *Done when:* a PR plan and a dispatch run work against the new org, and the
   `Berries-` token is gone.
-- [ ] **1b. Per-repo deploy keys.** Today both repos deploy with the host's
+- [x] **1b. Per-repo deploy keys.** Done: deploy.yml and backup.yml run on their own key; deploy-image.yml's key passed an SSH test and gets its first real run at the next image deploy. Today both repos deploy with the host's
   admin key. Give each repo its own key (public halves managed by
   `host/site.yml`), pin the host key in a secret instead of `ssh-keyscan` on
   every run.
@@ -49,9 +49,9 @@ what's done when it's done.
 
 ## 5. Smaller fixes
 
-- [x] **5a. Disk overcommit:** measured ~70 MiB per player; quota now 1 GiB (applies at the next deploy). 20 seats × 2 GiB quota = 40 GiB on a 30 GiB pool.
+- [x] **5a. Disk overcommit:** measured ~70 MiB per player; quota now 1 GiB (deployed). 20 seats × 2 GiB quota = 40 GiB on a 30 GiB pool.
   Measure real per-container usage, then size the pool or the quota so they fit.
-- [~] **5b. Leaderboard audit:** found a 0-second finish (straight to `dave`); runs that skip levels are now unranked. Old bogus row: pending decision. rows written before the `_EXE` fix may be forged.
+- [~] **5b. Leaderboard audit:** found a 0-second finish (straight to `dave`); runs that skip levels are now unranked (deployed). Old bogus row: pending decision. rows written before the `_EXE` fix may be forged.
 - [ ] **5c. One branch:** retire bandit-wannabe's `local-rebuild`; work on `main`.
 
 ## 6. Monitoring (separate phase)
