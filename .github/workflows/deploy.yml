@@ -14,13 +14,18 @@ on:
 
 concurrency: deploy        # never overlap two deploys
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
       HOST: ${{ secrets.DEPLOY_HOST }}
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Set up SSH to the host
         env:
