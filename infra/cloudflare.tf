@@ -4,13 +4,12 @@
 # sensitive env var in the TFC workspace (token "terraform-handover": tunnel,
 # Access, Turnstile and DNS on barrypekerman.com only).
 #
-# Not managed here (yet): the tunnel itself (phase 2 replaces it with one made
-# here) and the handover-ci service token (created by hand; its id is below).
+# Not managed here (yet): the handover-ci service token (created by hand; its
+# id is below). The tunnel both records point at is in tunnel.tf.
 
 locals {
   cf_account  = "dbcba7623c52bc78632ae5f31399a06d"
   cf_zone     = "8e1c1adb257eb08052cc949c2ae7bb0c"
-  tunnel_host = "ff6fc525-6791-4d75-aec0-a652197aaee2.cfargotunnel.com"
   ci_token_id = "9d89f0e8-38fc-4ebb-a9aa-1af61cfb7fe7" # service token handover-ci
 }
 
@@ -18,7 +17,7 @@ resource "cloudflare_dns_record" "play" {
   zone_id                 = local.cf_zone
   name                    = "play.barrypekerman.com"
   type                    = "CNAME"
-  content                 = local.tunnel_host
+  content                 = "${cloudflare_zero_trust_tunnel_cloudflared.handover.id}.cfargotunnel.com"
   proxied                 = true
   ttl                     = 1
   tags                    = []
@@ -37,7 +36,7 @@ resource "cloudflare_dns_record" "ssh" {
   zone_id                 = local.cf_zone
   name                    = "handover-ssh.barrypekerman.com"
   type                    = "CNAME"
-  content                 = local.tunnel_host
+  content                 = "${cloudflare_zero_trust_tunnel_cloudflared.handover.id}.cfargotunnel.com"
   proxied                 = true
   ttl                     = 1
   tags                    = []
