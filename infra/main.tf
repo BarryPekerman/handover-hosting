@@ -41,6 +41,10 @@ data "oci_core_images" "ubuntu" {
 }
 
 resource "oci_core_instance" "handover" {
+  # In-transit boot volume encryption is a launch option: changing it would
+  # replace the instance, which prevent_destroy forbids on a capacity-scarce
+  # free-tier box. Revisit on the next deliberate rebuild.
+  #checkov:skip=CKV_OCI_4:needs a rebuild; see comment above
   availability_domain = var.availability_domain
   compartment_id      = var.compartment_ocid
   display_name        = var.display_name
@@ -54,6 +58,12 @@ resource "oci_core_instance" "handover" {
   source_details {
     source_type = "image"
     source_id   = data.oci_core_images.ubuntu.images[0].id
+  }
+
+  # Metadata only through IMDS v2 (needs the Authorization header), which
+  # cloud-init and Oracle Cloud Agent already use. Applies in place.
+  instance_options {
+    are_legacy_imds_endpoints_disabled = true
   }
 
   create_vnic_details {
