@@ -12,3 +12,7 @@ jobs:
       - uses: actions/checkout@v4.2.2
       - name: Spawner compiles
         run: python3 -m py_compile spawner/spawner.py
+      - name: Install Ansible + ansible-lint (pinned)
+        run: python3 -m pip install --user "ansible-core==2.21.5" "ansible-lint==26.9.0"
+      - name: Host playbook lints
+        run: ansible-lint host/site.yml

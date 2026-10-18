@@ -1,0 +1,168 @@
+---
+# Host config for the Handover box (OCI A1, Ubuntu 24.04 ARM): everything the
+# spawner and player containers rely on, applied by deploy.yml before the
+# spawner is copied. Idempotent: on the live box a run reports no changes.
+#
+#   ansible-playbook -i <host>, -u ubuntu --private-key <key> host/site.yml --check --diff
+#
+# Not here: the spawner code, tunnel config and secrets (deploy.yml), the game
+# image (bandit-wannabe's deploy-image), the instance itself (infra/).
+- name: Handover host
+  hosts: all
+  become: true
+  vars:
+    cloudflared_version: "2026.10.1"
+    pool_size: 30GiB
+    isolated_profile:
+      config:
+        limits.cpu.allowance: 50%
+        limits.memory: 512MiB
+        limits.processes: "300"
+        # The game never uses /dev/incus/sock; it would leak the host name.
+        security.guestapi: "false"
+      devices:
+        eth0: { type: none }        # no NIC: isolation by absence
+        root: { path: /, pool: games, size: 2GiB, type: disk }
+
+  handlers:
+    - name: Apply sysctls
+      ansible.builtin.command: sysctl --system
+      changed_when: true
+
+    - name: Restart fail2ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        state: restarted
+
+    - name: Restart cloudflared
+      ansible.builtin.systemd:
+        name: cloudflared-handover
+        state: restarted
+        daemon_reload: true
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+  tasks:
+    - name: Packages
+      ansible.builtin.apt:
+        name: [incus, incus-client, ttyd, python3-aiohttp, fail2ban]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Cloudflared (pinned)
+      ansible.builtin.apt:
+        deb: "https://github.com/cloudflare/cloudflared/releases/download/{{ cloudflared_version }}/cloudflared-linux-arm64.deb"
+      notify: Restart cloudflared
+
+    # Every nested `ssh levelN@localhost` starts a systemd user manager; the
+    # stock 128 inotify instances run out by about level 2. ptrace_scope and
+    # dmesg_restrict can't be set inside a container, so the host enforces them.
+    - name: Sysctls
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-handover.conf
+        mode: "0644"
+        content: |
+          fs.inotify.max_user_instances = 1024
+          fs.inotify.max_user_watches = 524288
+          kernel.yama.ptrace_scope = 1
+          kernel.dmesg_restrict = 1
+      notify: Apply sysctls
+
+    # SSH is key-only, so this is about log noise and connection churn.
+    - name: Fail2ban sshd jail
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.local
+        mode: "0644"
+        content: |
+          [sshd]
+          enabled  = true
+          backend  = systemd
+          maxretry = 5
+          findtime = 10m
+          bantime  = 1h
+      notify: Restart fail2ban
+
+    - name: Fail2ban running
+      ansible.builtin.systemd:
+        name: fail2ban
+        enabled: true
+        state: started
+
+    # Pulled in as a dependency; nothing uses RPC and it's a reflection vector.
+    - name: Rpcbind off
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+        masked: true
+      loop: [rpcbind.service, rpcbind.socket]
+
+    - name: Ubuntu manages Incus
+      ansible.builtin.user:
+        name: ubuntu
+        groups: incus-admin
+        append: true
+
+    - name: Incus is initialised
+      ansible.builtin.command: incus admin init --minimal
+      args:
+        creates: /var/lib/incus/storage-pools/default
+
+    - name: Look for the games pool
+      ansible.builtin.command: incus storage show games
+      register: games_pool
+      changed_when: false
+      failed_when: games_pool.rc not in [0, 1]
+      check_mode: false
+
+    # btrfs: per-container disk quotas, and clones share the base image.
+    - name: Games pool
+      ansible.builtin.command: incus storage create games btrfs size={{ pool_size }}
+      when: games_pool.rc != 0
+      changed_when: true
+
+    - name: Look for the isolated profile
+      ansible.builtin.command: incus profile show isolated
+      register: profile
+      changed_when: false
+      failed_when: profile.rc not in [0, 1]
+      check_mode: false
+
+    - name: Isolated profile exists
+      ansible.builtin.command: incus profile create isolated
+      when: profile.rc != 0
+      changed_when: true
+
+    - name: Isolated profile matches
+      ansible.builtin.command:
+        cmd: incus profile edit isolated
+        stdin: "{{ isolated_profile | to_nice_yaml }}"
+      when: >-
+        profile.rc != 0 or
+        (profile.stdout | from_yaml).config != isolated_profile.config or
+        (profile.stdout | from_yaml).devices != isolated_profile.devices
+      changed_when: true
+
+    - name: Cloudflared unit
+      ansible.builtin.copy:
+        src: ../cloudflared/cloudflared-handover.service
+        dest: /etc/systemd/system/cloudflared-handover.service
+        mode: "0644"
+      notify: Restart cloudflared
+
+    # deploy.yml restarts the spawner after copying its code.
+    - name: Spawner unit
+      ansible.builtin.copy:
+        src: ../spawner/handover-spawner.service
+        dest: /etc/systemd/system/handover-spawner.service
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Services enabled
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+      loop: [incus, cloudflared-handover, handover-spawner]

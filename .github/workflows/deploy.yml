@@ -1,7 +1,8 @@
 name: deploy
 
-# Redeploys the spawner, its unit and the tunnel config to the host, and injects
-# the app secrets from GitHub Secrets. The hostile game box is never a secrets
+# Applies the host config (host/site.yml: packages, sysctls, fail2ban, Incus
+# pool + isolated profile, systemd units), then redeploys the spawner and the
+# tunnel config and injects the app secrets from GitHub Secrets. The hostile game box is never a secrets
 # client: CD (trusted) pushes a rendered env file to it. Swap GitHub Secrets for
 # HashiCorp Vault here later without touching the host (box never calls Vault).
 #
@@ -30,13 +31,19 @@ jobs:
           chmod 600 ~/.ssh/id
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Copy spawner, unit, and tunnel config
-        run: |
-          scp -i ~/.ssh/id spawner/spawner.py                ubuntu@"$HOST":~/spawner.py
-          scp -i ~/.ssh/id spawner/handover-spawner.service  ubuntu@"$HOST":/tmp/handover-spawner.service
-          scp -i ~/.ssh/id cloudflared/config.yml            ubuntu@"$HOST":~/.cloudflared/config.yml
+      - name: Install Ansible (pinned)
+        run: python3 -m pip install --user "ansible-core==2.21.5"
 
-      - name: Inject secrets, install unit, restart (non-destructive)
+      - name: Host config
+        run: |
+          ansible-playbook -i "$HOST," -u ubuntu --private-key ~/.ssh/id --diff host/site.yml
+
+      - name: Copy spawner and tunnel config
+        run: |
+          scp -i ~/.ssh/id spawner/spawner.py      ubuntu@"$HOST":~/spawner.py
+          scp -i ~/.ssh/id cloudflared/config.yml  ubuntu@"$HOST":~/.cloudflared/config.yml
+
+      - name: Inject secrets, restart (non-destructive)
         env:
           TS: ${{ secrets.TURNSTILE_SECRET }}
           GH: ${{ secrets.GH_CLIENT_SECRET }}
@@ -48,8 +55,6 @@ jobs:
             umask 077
             cat > /home/ubuntu/handover-spawner.env
             chmod 600 /home/ubuntu/handover-spawner.env
-            sudo mv /tmp/handover-spawner.service /etc/systemd/system/handover-spawner.service
-            sudo systemctl daemon-reload
             sudo systemctl restart handover-spawner
             sleep 2
             echo "health: $(curl -s 127.0.0.1:8080/healthz)"

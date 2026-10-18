@@ -8,8 +8,9 @@ image; this project only does hosting.
 
 ## Host prerequisites (OCI A1, Ubuntu 24.04 ARM)
 
-`infra/cloud-init.yaml` sets these up on a fresh box; the live box was set up by
-hand to match.
+`host/site.yml` (Ansible) describes all of this; `deploy.yml` applies it on every
+deploy, so the live box and a fresh one are configured by the same code. Dry
+run: `ansible-playbook -i <host>, -u ubuntu --private-key <key> host/site.yml --check --diff`.
 
 - Incus (`incus admin init --minimal`), `ubuntu` in `incus-admin`.
 - `ttyd` (>=1.7, past the old CVE), `python3-aiohttp`, `fail2ban`, rpcbind masked,
@@ -60,8 +61,9 @@ Config is env (see `handover-spawner.service` and the docstring at the top of
 ### Deploying
 
 Manual on purpose (starting it is the approval):
-`gh workflow run deploy.yml -R BarryPekerman/handover-hosting` copies the
-spawner, unit and tunnel config, writes the secrets and restarts the service.
+`gh workflow run deploy.yml -R BarryPekerman/handover-hosting` applies the host
+playbook, copies the spawner and tunnel config, writes the secrets and restarts
+the service.
 Pushes only run `ci.yml`. Infra: `infra/README.md`.
 
 ## Isolation
@@ -74,8 +76,6 @@ rule. Verified: a player container has only `lo`.
 ## Open
 
 - [ ] Mobile key-bar (Esc/Ctrl/Tab/arrows) for phone play.
-- [ ] Host config as code (Ansible) instead of hand setup + first-boot cloud-init
-      (`docs/pipeline-plan.md`, phase 3).
 - [ ] Lock the OCI security list to the admin IP (parked: the admin IP rotates;
       fail2ban covers the noise).
 
