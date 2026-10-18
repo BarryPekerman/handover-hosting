@@ -22,7 +22,7 @@ what's done when it's done.
 
 ## 2. Things that only exist on the host
 
-- [ ] **2a. Nightly backup** of the leaderboard DB and the tunnel credentials:
+- [x] **2a. Nightly backup** (done: `backup.yml`; restore tested) of the leaderboard DB and the tunnel credentials:
   a scheduled workflow pulls them over SSH, encrypts them with a passphrase
   secret, and keeps them as a private artifact (30 days).
   *Done when:* a run produces an artifact and a restore of it is tested.
