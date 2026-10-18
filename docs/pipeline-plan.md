@@ -17,7 +17,7 @@ Passwords are generated at build time into `credentials/` (21 `*_pass` + 5
 decoy files), which exists only on the host. Resume depends on them staying the
 same across builds.
 
-## Phase 1 — game image pipeline (bandit-wannabe)
+## Phase 1 — game image pipeline (bandit-wannabe) ✅ done 2026-10-18 (except step 5)
 
 1. **Passwords into a GitHub secret.** Copy the host's existing `credentials/`
    (tar + base64) into the repo secret `HANDOVER_CREDENTIALS`, so live players'
@@ -46,13 +46,18 @@ same across builds.
 6. Add the `DEPLOY_HOST` / `DEPLOY_SSH_KEY` secrets to bandit-wannabe (same
    values as handover-hosting).
 
-## Phase 2 — Terraform on Terraform Cloud (handover-hosting `infra/`)
+## Phase 2 — Terraform on Terraform Cloud (handover-hosting `infra/`) — in progress
+
+Done: TFC project/workspace + variables, `tf-handover` user/group/policy,
+compartment `handover`, `cloud {}` backend, `terraform.yml` (PR plan, manual
+apply). Driven from GitHub Actions with a team token, so no VCS connection.
+Left: move the instance into `handover`, migrate the state, confirm a no-op
+plan, delete the local state.
 
 1. **Workspace.** TFC org + workspace `handover-infra`, `cloud {}` block in
    `main.tf`, remote execution, auto-apply **off**.
-2. **VCS-driven.** Connect the repo, working dir `infra/`, trigger on
-   `infra/**`. A PR gets a plan as a GitHub check (linked to TFC); merging to
-   `master` queues an apply you confirm in TFC.
+2. **API-driven from GitHub Actions** (`terraform.yml`): a PR touching
+   `infra/` gets a speculative plan; `gh workflow run` plans and applies.
 3. **Provider auth without the laptop.** Replace `config_file_profile` with
    explicit `tenancy_ocid` / `user_ocid` / `fingerprint` / `private_key` /
    `region` variables, set as sensitive workspace variables. Use a dedicated OCI

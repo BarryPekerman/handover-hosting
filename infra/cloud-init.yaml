@@ -1,10 +1,9 @@
 #cloud-config
 # First-boot provisioning for the Handover host. Captures the steps that were
-# done by hand (Incus + the OCI bridge-egress fix + the isolated profile +
-# building the game image from the PUBLIC bandit-wannabe repo). It installs NO
-# secrets: the spawner code, the Cloudflare tunnel credentials, and the
-# Turnstile secret are delivered afterwards by the CD workflow (deploy.yml),
-# so nothing sensitive is ever baked into an image or this user_data.
+# done by hand (Incus, the storage pool, the isolated profile, cloudflared). It
+# installs NO secrets and builds nothing: after boot, bandit-wannabe's
+# deploy-image workflow ships the game image, and deploy.yml here delivers the
+# spawner, the tunnel config and the secrets.
 #
 # NOTE: this is a faithful transcription of the manual build; it still wants one
 # real boot to shake out ordering/timing before you rely on it for a rebuild.
@@ -15,20 +14,12 @@ packages:
   - incus-client
   - ttyd
   - python3-aiohttp
-  - git
-  - pipx
-  - python3-venv
-  - iptables-persistent
   # Ban hosts that hammer SSH. The host is key-only so this isn't about
   # stopping credential brute-force (there's nothing to guess); it caps the
   # log noise and connection churn from the constant internet background scan.
   - fail2ban
 
 write_files:
-  - path: /etc/profile.d/handover-build.sh
-    permissions: "0644"
-    content: |
-      export PATH="$HOME/.local/bin:$PATH"
   # Each nested in-game `ssh levelN@localhost` starts a systemd --user manager;
   # they pile up and exhaust inotify instances ("Too many open files") by ~level
   # 2 at the stock 128. Raise the host ceiling (it backs every container's users).
@@ -60,15 +51,8 @@ runcmd:
   # --- Incus ---
   - systemctl enable --now incus || true
   - incus admin init --minimal
-  - incus network set incusbr0 ipv6.address none
-
-  # --- OCI bridge egress: the stock image REJECTs INPUT/FORWARD, which strangles
-  #     the container bridge. Allow incusbr0 + masquerade, then persist. ---
-  - iptables -I INPUT   -i incusbr0 -j ACCEPT
-  - iptables -I FORWARD -i incusbr0 -j ACCEPT
-  - iptables -I FORWARD -o incusbr0 -j ACCEPT
-  - bash -c 'CIDR=$(incus network get incusbr0 ipv4.address); iptables -t nat -A POSTROUTING -s "$CIDR" ! -o incusbr0 -j MASQUERADE'
-  - netfilter-persistent save
+  # No bridge egress rules: player containers have no NIC, and the image is
+  # built in CI, so nothing on this host needs container networking.
   - usermod -aG incus-admin ubuntu
 
   # --- storage: a btrfs pool for player containers so we can enforce a per-
@@ -91,13 +75,6 @@ runcmd:
   # --- cloudflared (tunnel creds come later via CD, not here) ---
   - bash -c 'curl -fsSL -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb && dpkg -i /tmp/cloudflared.deb'
 
-  # --- build the game image from the PUBLIC repo, pinned ansible + collections.
-  #     Run as root so Incus access doesn't depend on a fresh login shell. ---
-  - git clone -b local-rebuild https://github.com/BarryPekerman/bandit-wannabe /opt/bandit-wannabe
-  - pipx install "ansible-core==2.21.5"
-  - /root/.local/bin/ansible-galaxy collection install -r /opt/bandit-wannabe/requirements.yml
-  - bash -c 'cd /opt/bandit-wannabe && PATH=/root/.local/bin:$PATH ./scripts/incus-image.sh build'
-
   # --- the spawner, its unit, the tunnel config + all secrets are delivered by
-  #     the CD workflow (deploy.yml) after this box is up. Trigger it, or push. ---
-final_message: "Handover host base ready. Run the CD deploy to install the spawner + secrets."
+  #     the CD workflow (deploy.yml) after this box is up. ---
+final_message: "Handover host base ready. Run deploy-image (bandit-wannabe), then deploy.yml here."
