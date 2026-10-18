@@ -5,6 +5,10 @@ terraform {
       source  = "oracle/oci"
       version = "~> 6.0"
     }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "5.28.0"
+    }
   }
   # State and runs live in Terraform Cloud (org berries-handover, project
   # handover) — its own org, so this repo's token reaches nothing else.
@@ -22,6 +26,9 @@ terraform {
 # Authenticates as tf-handover, an API-key-only user whose policy covers
 # instances and boot volumes in compartment `handover` (plus attaching to the
 # tenancy's one subnet) and nothing else.
+# Reads CLOUDFLARE_API_TOKEN from the workspace environment.
+provider "cloudflare" {}
+
 provider "oci" {
   tenancy_ocid = var.tenancy_ocid
   user_ocid    = var.user_ocid
