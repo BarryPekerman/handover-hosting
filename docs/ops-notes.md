@@ -31,6 +31,12 @@ top. Not player-facing.
 - **Deploys:** all manual `gh workflow run` (that's the approval): `deploy.yml`
   here (spawner), `deploy-image.yml` in bandit-wannabe (image),
   `terraform.yml` here (infra, via Terraform Cloud `berries-handover`).
+- **CI access:** each repo's deploy workflow has its own SSH key
+  (`DEPLOY_SSH_KEY`; public halves in `host/deploy-keys/`, installed by
+  `host/site.yml`) and checks the host key against `DEPLOY_KNOWN_HOSTS`. To
+  revoke a repo's access: remove its line from `~ubuntu/.ssh/authorized_keys`
+  and its file + loop entry from `host/site.yml`. The admin key
+  (`alex_handover`) is in no repo.
 - **Secrets:** `/home/ubuntu/handover-spawner.env` (git-ignored, host-only):
   `SESSION_SECRET`, `GH_CLIENT_SECRET`, `TURNSTILE_SECRET`. Tunnel creds are
   cloudflared's. Nothing sensitive is in git or the image.
