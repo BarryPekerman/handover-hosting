@@ -1,8 +1,8 @@
 name: deploy
 
 # Applies the host config (host/site.yml: packages, sysctls, fail2ban, Incus
-# pool + isolated profile, systemd units), then redeploys the spawner and the
-# tunnel config and injects the app secrets from GitHub Secrets. The hostile game box is never a secrets
+# pool + isolated profile, tunnel config, systemd units), then redeploys the
+# spawner and injects the app secrets from GitHub Secrets. The hostile game box is never a secrets
 # client: CD (trusted) pushes a rendered env file to it. Swap GitHub Secrets for
 # HashiCorp Vault here later without touching the host (box never calls Vault).
 #
@@ -20,36 +20,28 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      HOST: ${{ secrets.DEPLOY_HOST }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
 
-      # This repo's own deploy key (handover-hosting/host/deploy-keys), and the
-      # host key pinned in a secret instead of trusted from ssh-keyscan.
-      - name: Set up SSH to the host
-        env:
-          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$KEY" > ~/.ssh/id
-          chmod 600 ~/.ssh/id
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: SSH to the host through the Cloudflare tunnel
+        uses: ./.github/actions/tunnel-ssh
+        with:
+          ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          access-client-id: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          access-client-secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
 
       - name: Install Ansible (pinned)
         run: python3 -m pip install --user "ansible-core==2.21.5"
 
       - name: Host config
         run: |
-          ansible-playbook -i "$HOST," -u ubuntu --private-key ~/.ssh/id --diff host/site.yml
+          ansible-playbook -i handover, --diff host/site.yml
 
-      - name: Copy spawner and tunnel config
-        run: |
-          scp -i ~/.ssh/id spawner/spawner.py      ubuntu@"$HOST":~/spawner.py
-          scp -i ~/.ssh/id cloudflared/config.yml  ubuntu@"$HOST":~/.cloudflared/config.yml
+      - name: Copy spawner
+        run: scp spawner/spawner.py handover:~/spawner.py
 
       - name: Inject secrets, restart (non-destructive)
         env:
@@ -59,7 +51,7 @@ jobs:
         run: |
           # secrets travel over stdin, never in the host's process args
           printf 'TURNSTILE_SECRET=%s\nGH_CLIENT_SECRET=%s\nSESSION_SECRET=%s\n' "$TS" "$GH" "$SS" \
-            | ssh -i ~/.ssh/id ubuntu@"$HOST" '
+            | ssh handover '
             umask 077
             cat > /home/ubuntu/handover-spawner.env
             chmod 600 /home/ubuntu/handover-spawner.env
