@@ -175,6 +175,58 @@
         mode: "0644"
       notify: Reload systemd
 
+    # Unattended upgrades install kernels but never reboot, and player
+    # containers share the host kernel, so pending kernels must take effect.
+    # Every night at 04:00 Israel time: reboot only if one is pending and
+    # nobody is playing (players resume afterwards); otherwise try next night.
+    - name: Reboot-when-needed script
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/handover-maybe-reboot
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # Managed by host/site.yml. DRY_RUN=1 prints the decision only.
+          [ -f /run/reboot-required ] || { echo "no reboot pending"; exit 0; }
+          why=$(tr '\n' ' ' < /run/reboot-required.pkgs 2>/dev/null)
+          players=$(curl -s -m 5 http://127.0.0.1:8080/healthz |
+            python3 -c 'import json, sys; print(json.load(sys.stdin)["players"])' 2>/dev/null)
+          if [ "$players" != 0 ]; then
+            logger -t handover-reboot -s "reboot pending ($why), players=${players:-unknown}: next night"
+            exit 0
+          fi
+          logger -t handover-reboot -s "rebooting for: $why"
+          [ -n "${DRY_RUN:-}" ] || systemctl reboot
+
+    - name: Reboot-when-needed service and timer
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/handover-maybe-reboot.{{ item.ext }}"
+        mode: "0644"
+        content: "{{ item.content }}"
+      loop:
+        - ext: service
+          content: |
+            [Unit]
+            Description=Reboot for pending updates when nobody is playing
+            [Service]
+            Type=oneshot
+            ExecStart=/usr/local/sbin/handover-maybe-reboot
+        - ext: timer
+          content: |
+            [Unit]
+            Description=Nightly check for a pending reboot
+            [Timer]
+            OnCalendar=*-*-* 04:00:00 Asia/Jerusalem
+            [Install]
+            WantedBy=timers.target
+      notify: Reload systemd
+
+    - name: Reboot-when-needed timer on
+      ansible.builtin.systemd:
+        name: handover-maybe-reboot.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
     - name: Services enabled
       ansible.builtin.systemd:
         name: "{{ item }}"

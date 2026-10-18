@@ -34,7 +34,7 @@ what's done when it's done.
 
 ## 3. Patching
 
-- [ ] **3. Kernel updates take effect.** Unattended upgrades install kernels but
+- [x] **3. Kernel updates take effect.** Done: `handover-maybe-reboot.timer` (04:00 Israel time; reboots only if pending and 0 players). Original note: Unattended upgrades install kernels but
   never reboot. Either Ubuntu Livepatch (needs a free Ubuntu Pro token) or a
   playbook-managed timer that reboots at night only when a reboot is required
   and no one is playing (players resume afterwards).
