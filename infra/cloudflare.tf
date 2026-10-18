@@ -82,10 +82,15 @@ resource "cloudflare_zero_trust_access_policy" "admin" {
 }
 
 resource "cloudflare_zero_trust_access_policy" "ci" {
-  account_id       = local.cf_account
-  name             = "handover-ci"
-  decision         = "non_identity" # service auth: no browser login
-  include          = [{ service_token = { token_id = local.ci_token_id } }]
+  account_id = local.cf_account
+  name       = "handover-ci"
+  decision   = "non_identity" # service auth: no browser login
+  # Both tokens while CI moves to the Terraform-made one (github.tf); the
+  # hand-made token comes out in the next change.
+  include = [
+    { service_token = { token_id = local.ci_token_id } },
+    { service_token = { token_id = cloudflare_zero_trust_access_service_token.ci.id } },
+  ]
   connection_rules = { rdp = {} }
 }
 
