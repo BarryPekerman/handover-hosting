@@ -17,18 +17,17 @@ permissions:
 jobs:
   backup:
     runs-on: ubuntu-latest
-    env:
-      HOST: ${{ secrets.DEPLOY_HOST }}
     steps:
-      - name: Set up SSH to the host
-        env:
-          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$KEY" > ~/.ssh/id
-          chmod 600 ~/.ssh/id
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: SSH to the host through the Cloudflare tunnel
+        uses: ./.github/actions/tunnel-ssh
+        with:
+          ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          access-client-id: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          access-client-secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
 
       # sqlite's backup API gives a consistent copy while the spawner writes.
       - name: Collect and encrypt
@@ -36,7 +35,7 @@ jobs:
           PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
           umask 077
-          ssh -i ~/.ssh/id ubuntu@"$HOST" 'set -euo pipefail
+          ssh handover 'set -euo pipefail
             d=$(mktemp -d); trap "rm -rf $d" EXIT
             python3 -c "import sqlite3, sys; s = sqlite3.connect(sys.argv[1]); t = sqlite3.connect(sys.argv[2]); s.backup(t); t.close()" \
               ~/handover-leaderboard.db "$d/handover-leaderboard.db"

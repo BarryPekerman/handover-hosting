@@ -1,0 +1,44 @@
+name: SSH to the Handover host through the Cloudflare tunnel
+description: >
+  Sets up `ssh handover` (also for scp and ansible): the repo's deploy key, the
+  pinned host key, and cloudflared as ProxyCommand authenticating to Cloudflare
+  Access with the handover-ci service token. Public port 22 is closed.
+inputs:
+  ssh-key: { description: "the repo's deploy key (DEPLOY_SSH_KEY)", required: true }
+  known-hosts: { description: "pinned host key line (DEPLOY_KNOWN_HOSTS)", required: true }
+  access-client-id: { description: "CF_ACCESS_CLIENT_ID", required: true }
+  access-client-secret: { description: "CF_ACCESS_CLIENT_SECRET", required: true }
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        KEY: ${{ inputs.ssh-key }}
+        KNOWN_HOSTS: ${{ inputs.known-hosts }}
+        CF_ID: ${{ inputs.access-client-id }}
+        CF_SECRET: ${{ inputs.access-client-secret }}
+      run: |
+        curl -fsSL -o /tmp/cloudflared.deb \
+          https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-amd64.deb
+        sudo dpkg -i /tmp/cloudflared.deb >/dev/null
+        install -m 700 -d ~/.ssh
+        printf '%s\n' "$KEY" > ~/.ssh/id
+        chmod 600 ~/.ssh/id
+        printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+        # The service token lives in a runner-only proxy script, not in the
+        # job environment.
+        { echo '#!/bin/sh'
+          printf 'export TUNNEL_SERVICE_TOKEN_ID=%q TUNNEL_SERVICE_TOKEN_SECRET=%q\n' "$CF_ID" "$CF_SECRET"
+          echo 'exec cloudflared access ssh --hostname "$1"'
+        } > ~/.ssh/cf-proxy
+        chmod 700 ~/.ssh/cf-proxy
+        cat > ~/.ssh/config <<'CFG'
+        Host handover
+          HostName handover-ssh.barrypekerman.com
+          User ubuntu
+          IdentityFile ~/.ssh/id
+          IdentitiesOnly yes
+          StrictHostKeyChecking yes
+          ProxyCommand ~/.ssh/cf-proxy %h
+        CFG
+        ssh handover true && echo "ssh handover: ok (through the tunnel)"

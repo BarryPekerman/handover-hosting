@@ -160,6 +160,15 @@
         (profile.stdout | from_yaml).devices != isolated_profile.devices
       changed_when: true
 
+    - name: Cloudflared tunnel config
+      ansible.builtin.copy:
+        src: ../cloudflared/config.yml
+        dest: /home/ubuntu/.cloudflared/config.yml
+        owner: ubuntu
+        group: ubuntu
+        mode: "0644"
+      notify: Restart cloudflared
+
     - name: Cloudflared unit
       ansible.builtin.copy:
         src: ../cloudflared/cloudflared-handover.service
