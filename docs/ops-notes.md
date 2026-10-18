@@ -30,7 +30,7 @@ top. Not player-facing.
   Nothing is built on the host.
 - **Deploys:** all manual `gh workflow run` (that's the approval): `deploy.yml`
   here (spawner), `deploy-image.yml` in bandit-wannabe (image),
-  `terraform.yml` here (infra, via Terraform Cloud `Berries-/handover`).
+  `terraform.yml` here (infra, via Terraform Cloud `berries-handover`).
 - **Secrets:** `/home/ubuntu/handover-spawner.env` (git-ignored, host-only):
   `SESSION_SECRET`, `GH_CLIENT_SECRET`, `TURNSTILE_SECRET`. Tunnel creds are
   cloudflared's. Nothing sensitive is in git or the image.
