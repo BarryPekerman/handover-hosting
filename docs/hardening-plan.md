@@ -62,7 +62,7 @@ what's done when it's done.
   reached to install the tunnel. Store the tunnel's token as a sensitive TFC
   variable; cloud-init installs cloudflared and runs it, so CI can reach a new
   box straight away.
-- [x] **7b. Cloudflare as code.** Done: DNS, Access app + policies, Turnstile imported; tunnel `handover-tf` made in Terraform and the old one removed. Left: the hand-made service token (phase 3). Original note: Tunnel, DNS records, the Access app, its two
+- [x] **7b. Cloudflare as code.** Done: DNS, Access app + policies, Turnstile imported; tunnel `handover-tf` made in Terraform and the old one removed. The CI service token and the secrets made from it are Terraform too (`github.tf`); the hand-made token is deleted. Original note: Tunnel, DNS records, the Access app, its two
   policies and the service token were created by hand; the Cloudflare
   Terraform provider (with an API token in TFC) would make a from-scratch
   rebuild `terraform apply` plus the deploys.

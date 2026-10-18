@@ -190,6 +190,9 @@ which it ignores.)
     follows their GitHub account across devices.
   - MOTD no longer shows a pager hint.
   - Host config is `host/site.yml` (applied by deploy.yml); tmux shared screen.
+  - CI secrets from Terraform: service token `handover-ci-tf` and the tunnel
+    token are written into the repos by `infra/github.tf`; the hand-made
+    service token was deleted.
   - Cloudflare in Terraform: DNS, Access app + policies, Turnstile imported;
     a Terraform-made tunnel `handover-tf` replaced the file-configured one
     (switched with both up, then the old tunnel, its connector and the host's
