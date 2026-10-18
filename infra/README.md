@@ -11,7 +11,8 @@ Terraform won't touch the existing network. Only the instance is managed.
 
 ## Setup
 
-State and runs live in **Terraform Cloud**: org `Berries-`, project `handover`,
+State and runs live in **Terraform Cloud**: org `berries-handover` (its own org,
+so the repo's token can't reach anything else), project `handover`,
 workspace `handover-infra` (remote execution, working directory `infra`).
 Terraform authenticates as **`tf-handover`**, an API-key-only OCI user in group
 `handover-terraform`. Its policy (`handover-terraform`) allows managing

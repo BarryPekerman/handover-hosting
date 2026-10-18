@@ -6,11 +6,12 @@ terraform {
       version = "~> 6.0"
     }
   }
-  # State and runs live in Terraform Cloud (org Berries-, project handover).
+  # State and runs live in Terraform Cloud (org berries-handover, project
+  # handover) — its own org, so this repo's token reaches nothing else.
   # Runs execute remotely with the workspace's variables, so nothing here
   # needs ~/.oci or ~/.ssh. CI drives it: .github/workflows/terraform.yml.
   cloud {
-    organization = "Berries-"
+    organization = "berries-handover"
     workspaces {
       project = "handover"
       name    = "handover-infra"

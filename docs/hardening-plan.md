@@ -5,7 +5,7 @@ what's done when it's done.
 
 ## 1. Credential blast radius
 
-- [ ] **1a. Own Terraform Cloud org for handover.** `TF_API_TOKEN` is an owners
+- [x] **1a. Own Terraform Cloud org for handover.** Done: org `berries-handover`. `TF_API_TOKEN` is an owners
   token for `Berries-`, which also holds `oci-oke-infra`. Move the
   `handover-infra` workspace to a new free org (new workspace, variables, a new
   `tf-handover` API key since the old private key isn't recoverable, state
