@@ -48,11 +48,14 @@ jobs:
       - name: Inject secrets, restart (non-destructive)
         env:
           TS: ${{ secrets.TURNSTILE_SECRET }}
+          TK: ${{ secrets.TURNSTILE_SITEKEY }}
           GH: ${{ secrets.GH_CLIENT_SECRET }}
           SS: ${{ secrets.SESSION_SECRET }}
         run: |
+          # A secret without its sitekey would make every Play fail the bot check.
+          if [ -z "$TK" ] || [ -z "$TS" ]; then echo "::error::Turnstile sitekey/secret missing"; exit 1; fi
           # secrets travel over stdin, never in the host's process args
-          printf 'TURNSTILE_SECRET=%s\nGH_CLIENT_SECRET=%s\nSESSION_SECRET=%s\n' "$TS" "$GH" "$SS" \
+          printf 'TURNSTILE_SITEKEY=%s\nTURNSTILE_SECRET=%s\nGH_CLIENT_SECRET=%s\nSESSION_SECRET=%s\n' "$TK" "$TS" "$GH" "$SS" \
             | ssh handover '
             umask 077
             cat > /home/ubuntu/handover-spawner.env
