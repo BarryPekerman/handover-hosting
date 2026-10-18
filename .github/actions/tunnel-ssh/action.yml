@@ -2,7 +2,7 @@ name: SSH to the Handover host through the Cloudflare tunnel
 description: >
   Sets up `ssh handover` (also for scp and ansible): the repo's deploy key, the
   pinned host key, and cloudflared as ProxyCommand authenticating to Cloudflare
-  Access with the handover-ci service token. Public port 22 is closed.
+  Access with the handover-ci-tf service token (infra/github.tf). Public port 22 is closed.
 inputs:
   ssh-key: { description: "the repo's deploy key (DEPLOY_SSH_KEY)", required: true }
   known-hosts: { description: "pinned host key line (DEPLOY_KNOWN_HOSTS)", required: true }
