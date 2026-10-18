@@ -1,0 +1,46 @@
+#cloud-config
+# First boot of a new Handover host (rendered by Terraform; existing instances
+# ignore user_data changes). It does one thing beyond updates: start the
+# tunnel connector, so the box is reachable through handover-ssh with port 22
+# closed. Everything else (packages, Incus pool + profile, sysctls, units) is
+# host/site.yml, applied by deploy.yml.
+#
+# The connector unit and env file below must match host/site.yml ("Tunnel
+# connector" tasks), which takes them over on the first deploy.
+#
+# After `terraform apply` creates a box:
+#   1. gh workflow run deploy.yml -R BarryPekerman/handover-hosting
+#      (host config + spawner; Incus has to exist before an image can land)
+#   2. gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<latest passing ci on main>
+package_update: true
+package_upgrade: true
+
+write_files:
+  - path: /etc/cloudflared/handover-tf.env
+    permissions: "0600"
+    content: |
+      TUNNEL_TOKEN=${tunnel_token}
+  - path: /etc/systemd/system/cloudflared-tf.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Cloudflare tunnel handover-tf (routes managed in Terraform)
+      After=network-online.target
+      Wants=network-online.target
+      ConditionPathExists=/etc/cloudflared/handover-tf.env
+      [Service]
+      EnvironmentFile=/etc/cloudflared/handover-tf.env
+      ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run
+      DynamicUser=yes
+      Restart=on-failure
+      RestartSec=5
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - curl -fsSL -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/download/${cloudflared_version}/cloudflared-linux-arm64.deb
+  - dpkg -i /tmp/cloudflared.deb
+  - systemctl daemon-reload
+  - systemctl enable --now cloudflared-tf
+
+final_message: "Handover host up; tunnel connector started. Next: deploy.yml, then deploy-image."
