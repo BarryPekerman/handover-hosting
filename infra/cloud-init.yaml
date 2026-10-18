@@ -5,7 +5,10 @@
 # configured by the same code. No secrets here either.
 #
 # After `terraform apply` creates a box:
-#   1. update the DEPLOY_HOST secret (both repos) if the IP changed
+#   1. the box is unreachable: port 22 is closed and the tunnel isn't set up
+#      yet. Until cloud-init brings the tunnel up itself (hardening-plan 7a),
+#      break-glass: open TCP 22 to your IP (docs/ops-notes.md), run step 2 with
+#      a temporary inventory pointing at the IP, then close it again.
 #   2. gh workflow run deploy.yml -R BarryPekerman/handover-hosting
 #      (host config + spawner; Incus has to exist before an image can land)
 #   3. gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<latest passing ci on main>

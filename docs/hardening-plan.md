@@ -26,7 +26,9 @@ what's done when it's done.
   a scheduled workflow pulls them over SSH, encrypts them with a passphrase
   secret, and keeps them as a private artifact (30 days).
   *Done when:* a run produces an artifact and a restore of it is tested.
-- [ ] **2b. Reserved public IP** in Terraform, so a stop/start can't change the
+- [x] **2b. ~~Reserved public IP~~ — superseded:** SSH and CI go through the
+  Cloudflare tunnel (`handover-ssh`, Access-protected); public port 22 is
+  closed, so the IP no longer matters. Original note: in Terraform, so a stop/start can't change the
   address the deploy pipelines use. OCI can't convert an ephemeral IP, so the
   address changes once (SSH + deploys; the site is unaffected — the tunnel dials
   out).
@@ -53,6 +55,19 @@ what's done when it's done.
   Measure real per-container usage, then size the pool or the quota so they fit.
 - [~] **5b. Leaderboard audit:** found a 0-second finish (straight to `dave`); runs that skip levels are now unranked (deployed). Old bogus row: pending decision. rows written before the `_EXE` fix may be forged.
 - [x] **5c. One branch:** done; `local-rebuild` deleted, bandit-wannabe works on `main`.
+
+## 7. Rebuildability
+
+- [ ] **7a. Tunnel at first boot.** With port 22 closed, a fresh box can't be
+  reached to install the tunnel. Store the tunnel's token as a sensitive TFC
+  variable; cloud-init installs cloudflared and runs it, so CI can reach a new
+  box straight away.
+- [ ] **7b. Cloudflare as code.** Tunnel, DNS records, the Access app, its two
+  policies and the service token were created by hand; the Cloudflare
+  Terraform provider (with an API token in TFC) would make a from-scratch
+  rebuild `terraform apply` plus the deploys.
+- [ ] **7c. Rotate the `handover-ci` service token** (its secret went through a
+  chat), then set the new one in both repos from a terminal.
 
 ## 6. Monitoring (separate phase)
 

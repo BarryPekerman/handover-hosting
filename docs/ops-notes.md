@@ -9,14 +9,21 @@ top. Not player-facing.
 ## System at a glance
 
 - **Live URL:** https://play.barrypekerman.com (anonymous or GitHub sign-in).
-- **Host:** OCI ARM (aarch64) instance, public IP `84.13.72.156`.
-  Access: `ssh -i ~/.ssh/handover ubuntu@84.13.72.156` (key-only; `ubuntu`
-  is in `incus-admin`). This is a family member's separate OCI tenancy,
-  isolated from the OKE cluster.
+- **Host:** OCI ARM (aarch64) instance in compartment `handover` of a family
+  member's separate OCI tenancy, isolated from the OKE cluster. Public IP
+  `84.13.72.156` (ephemeral; nothing depends on it any more).
+- **Access: `ssh handover`** — through the Cloudflare tunnel
+  (`handover-ssh.barrypekerman.com`, Cloudflare Access app `handover-ssh`: your
+  email login in the browser about once a day; `~/.ssh/config` entry uses
+  `cloudflared access ssh`). **Public port 22 is closed** at the subnet's
+  security list. Key-only; `ubuntu` is in `incus-admin`.
+- **Break-glass** (tunnel down): OCI console → Networking → Virtual cloud
+  networks → Basic-VCN → Security Lists → Default Security List → add ingress
+  TCP 22 from your IP; then `ssh -i ~/.ssh/handover ubuntu@<ip>`; remove
+  the rule afterwards.
 - **Serving path:** browser → Cloudflare (DNS is Cloudflare-only; origin IP not
   in DNS) → **Cloudflare Tunnel** (`cloudflared`, outbound) → spawner on
-  `127.0.0.1:8080`. No inbound web port on the origin; only SSH :22 is open
-  externally.
+  `127.0.0.1:8080`. Nothing is open inbound on the origin, SSH included.
 - **Spawner:** `spawner.py` (aiohttp), systemd unit `handover-spawner`
   (`/etc/systemd/system/handover-spawner.service`, runs as `ubuntu`,
   `ExecStart=/home/ubuntu/spawner.py`). One per-player **Incus** container
@@ -51,8 +58,7 @@ compartment `handover`). Host config is `host/site.yml`, applied by
 ## Operator playbook
 
 ```bash
-H=84.13.72.156; K=~/.ssh/handover
-ssh -i $K ubuntu@$H                                   # get on the box
+ssh handover                                          # get on the box (tunnel)
 
 # health / who's playing
 curl -s 127.0.0.1:8080/healthz                        # {"players":N,"max":20}
@@ -88,7 +94,7 @@ hand. The game image ships the same way from bandit-wannabe: a `ci` run on
 imports it and moves the `handover` alias (previous kept as `handover-prev`).
 Host setup changes go in `host/site.yml` (Ansible), never by hand: `deploy.yml`
 applies it on every deploy. Dry run from a laptop:
-`ansible-playbook -i 84.13.72.156, -u ubuntu --private-key ~/.ssh/handover host/site.yml --check --diff`.
+`ansible-playbook -i handover, host/site.yml --check --diff`.
 
 ## Reboots
 
@@ -150,7 +156,9 @@ Strong: unprivileged containers, no network device (no egress, no cloud
 metadata), guest API off, fork-bomb/mem-bomb contained by cgroup limits, 2 GiB
 disk quota caps fill, 30 GiB pool is the host ceiling. Spawning gated by
 Cloudflare Turnstile + per-IP rate limit (5/10 min) + hard 20-seat cap.
-fail2ban on sshd. Host SSH is key-only.
+No inbound ports at all: SSH only through the tunnel behind Cloudflare Access,
+key-only. (fail2ban still runs but sees only tunnel traffic from localhost,
+which it ignores.)
 
 ## Parked / not done
 
@@ -180,6 +188,8 @@ fail2ban on sshd. Host SSH is key-only.
     follows their GitHub account across devices.
   - MOTD no longer shows a pager hint.
   - Host config is `host/site.yml` (applied by deploy.yml); tmux shared screen.
+  - SSH moved behind the tunnel + Cloudflare Access; public port 22 closed;
+    CI uses the `handover-ci` service token (shared `tunnel-ssh` action).
   - Static-analysis pass (ruff, pylint, vulture, radon, actionlint, zizmor,
     checkov, jscpd): spawner refactor, actions pinned to SHAs, read-only
     workflow tokens. PR #1 (IMDS v2 only) awaits merge + terraform apply.
