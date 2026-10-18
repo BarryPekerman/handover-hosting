@@ -20,7 +20,7 @@ env:
   TF_CLOUD_ORGANIZATION: Berries-
   TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
   TF_WORKSPACE: handover-infra
-  CONFIG_DIRECTORY: ./infra
+  CONFIG_DIRECTORY: ./   # repo root: the workspace sets working directory infra/
 
 jobs:
   terraform:
