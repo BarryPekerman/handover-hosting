@@ -1,0 +1,84 @@
+name: terraform
+
+# Infra (infra/) runs in Terraform Cloud: org Berries-, project handover,
+# workspace handover-infra (remote execution, OCI creds as workspace variables).
+#   - PR touching infra/  -> speculative plan, summary on the run page
+#   - manual dispatch     -> plan, then apply only if the plan has changes.
+#     Starting it is the approval:
+#       gh workflow run terraform.yml -R BarryPekerman/handover-hosting
+on:
+  pull_request:
+    paths: ["infra/**"]
+  workflow_dispatch:
+
+concurrency: terraform
+
+env:
+  TF_CLOUD_ORGANIZATION: Berries-
+  TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+  TF_WORKSPACE: handover-infra
+  CONFIG_DIRECTORY: ./infra
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.3.2
+        id: upload
+        with:
+          workspace: ${{ env.TF_WORKSPACE }}
+          directory: ${{ env.CONFIG_DIRECTORY }}
+          speculative: true
+      - uses: hashicorp/tfc-workflows-github/actions/create-run@v1.3.2
+        id: run
+        with:
+          workspace: ${{ env.TF_WORKSPACE }}
+          configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
+          plan_only: true
+      - uses: hashicorp/tfc-workflows-github/actions/plan-output@v1.3.2
+        id: out
+        with:
+          plan: ${{ fromJSON(steps.run.outputs.payload).data.relationships.plan.data.id }}
+      - name: Summary
+        run: |
+          {
+            echo "### Terraform plan (speculative)"
+            echo "add ${{ steps.out.outputs.add }}, change ${{ steps.out.outputs.change }}, destroy ${{ steps.out.outputs.destroy }}"
+            echo "[run in Terraform Cloud](${{ steps.run.outputs.run_link }})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.3.2
+        id: upload
+        with:
+          workspace: ${{ env.TF_WORKSPACE }}
+          directory: ${{ env.CONFIG_DIRECTORY }}
+      - uses: hashicorp/tfc-workflows-github/actions/create-run@v1.3.2
+        id: run
+        with:
+          workspace: ${{ env.TF_WORKSPACE }}
+          configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
+          message: "gh: ${{ github.sha }} by ${{ github.actor }}"
+      - uses: hashicorp/tfc-workflows-github/actions/plan-output@v1.3.2
+        id: out
+        with:
+          plan: ${{ fromJSON(steps.run.outputs.payload).data.relationships.plan.data.id }}
+      # A no-change plan is left alone (TFC marks it planned_and_finished).
+      - uses: hashicorp/tfc-workflows-github/actions/apply-run@v1.3.2
+        if: fromJSON(steps.run.outputs.payload).data.attributes.actions.IsConfirmable
+        with:
+          run: ${{ steps.run.outputs.run_id }}
+          comment: "applied from GitHub run ${{ github.run_id }}"
+      - name: Summary
+        run: |
+          {
+            echo "### Terraform apply"
+            echo "add ${{ steps.out.outputs.add }}, change ${{ steps.out.outputs.change }}, destroy ${{ steps.out.outputs.destroy }}"
+            echo "[run in Terraform Cloud](${{ steps.run.outputs.run_link }})"
+          } >> "$GITHUB_STEP_SUMMARY"

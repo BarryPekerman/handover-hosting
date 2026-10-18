@@ -6,13 +6,27 @@ terraform {
       version = "~> 6.0"
     }
   }
-  # For real use, move state to a remote backend (OCI Object Storage / TF Cloud).
-  # Local state is fine to start but contains sensitive values - it's git-ignored.
+  # State and runs live in Terraform Cloud (org Berries-, project handover).
+  # Runs execute remotely with the workspace's variables, so nothing here
+  # needs ~/.oci or ~/.ssh. CI drives it: .github/workflows/terraform.yml.
+  cloud {
+    organization = "Berries-"
+    workspaces {
+      project = "handover"
+      name    = "handover-infra"
+    }
+  }
 }
 
+# Authenticates as tf-handover, an API-key-only user whose policy covers
+# instances and boot volumes in compartment `handover` (plus attaching to the
+# tenancy's one subnet) and nothing else.
 provider "oci" {
-  config_file_profile = var.oci_profile # [ALEX] in ~/.oci/config
-  region              = var.region
+  tenancy_ocid = var.tenancy_ocid
+  user_ocid    = var.user_ocid
+  fingerprint  = var.fingerprint
+  private_key  = var.private_key
+  region       = var.region
 }
 
 # Latest Canonical Ubuntu 24.04 arm64 image in this tenancy (so a rebuild always
@@ -48,7 +62,7 @@ resource "oci_core_instance" "handover" {
   }
 
   metadata = {
-    ssh_authorized_keys = file(var.ssh_public_key_path)
+    ssh_authorized_keys = var.ssh_public_key
     user_data           = base64encode(file("${path.module}/cloud-init.yaml"))
   }
 
