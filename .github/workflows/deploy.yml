@@ -27,14 +27,17 @@ jobs:
         with:
           persist-credentials: false
 
+      # This repo's own deploy key (handover-hosting/host/deploy-keys), and the
+      # host key pinned in a secret instead of trusted from ssh-keyscan.
       - name: Set up SSH to the host
         env:
           KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "$KEY" > ~/.ssh/id
           chmod 600 ~/.ssh/id
-          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
 
       - name: Install Ansible (pinned)
         run: python3 -m pip install --user "ansible-core==2.21.5"
