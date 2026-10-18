@@ -65,6 +65,7 @@ locks: dict[str, asyncio.Lock] = {}      # per-sid provisioning lock
 states: dict[str, str] = {}              # sid -> "pending"|"full"|"error" (ready == in sessions)
 ip_hits: dict[str, list] = {}            # client IP -> recent provision timestamps (throttle)
 who: dict[str, dict] = {}                # sid -> {"uid": <github id>|None, "display": str}
+                                         # (a signed-in player's box follows the account)
 live_ws: set = set()                     # open terminal WebSockets, closed on shutdown
 resume_req: dict[str, tuple] = {}        # sid -> (saved {level: pass}, server-known level[, note])
 live_image = ""                          # fingerprint BASE_IMAGE points at now
@@ -268,8 +269,38 @@ def identity(request):
     return (str(p.get("uid")), "@" + str(p.get("login", "?")))
 
 
-def identity_display(request) -> str:
-    return identity(request)[1]
+def account_sid(uid) -> str | None:
+    """The live (or still provisioning) box owned by GitHub account `uid`."""
+    for sid, w in who.items():
+        if w.get("uid") == uid and (sid in sessions or states.get(sid) == "pending"):
+            return sid
+    return None
+
+
+def resolve_sid(request) -> str | None:
+    """This visitor's box. Signed in: the account's box, from any device; else
+    the cookie's box, which a signed-in player claims if it's anonymous (never
+    another account's). Anonymous: the cookie's box."""
+    uid, _ = identity(request)
+    cookie = request.cookies.get(COOKIE)
+    if uid:
+        mine = account_sid(uid)
+        if mine:
+            return mine
+        if cookie and who.get(cookie, {}).get("uid") not in (None, uid):
+            return None
+    return cookie
+
+
+def remember(sid: str, uid, display: str):
+    """Record who a box belongs to. Signing out never downgrades an account's box."""
+    if uid or who.get(sid, {}).get("uid") is None:
+        who[sid] = {"uid": uid, "display": display}
+
+
+def with_cookie(resp, sid: str):
+    resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", path="/", max_age=MAX_LIFE)
+    return resp
 
 
 def throttled(ip: str) -> bool:
@@ -302,7 +333,8 @@ def alloc_port() -> int:
 def save_state():
     """Persist sessions (minus the live proc handle) so a restart can re-adopt them."""
     try:
-        data = {sid: {k: s[k] for k in ("ct", "port", "created", "last", "start", "image")}
+        data = {sid: {**{k: s[k] for k in ("ct", "port", "created", "last", "start", "image")},
+                      "who": who.get(sid, {"uid": None, "display": "anonymous"})}
                 for sid, s in sessions.items()}
         tmp = STATE_FILE + ".tmp"
         with open(tmp, "w") as f:
@@ -670,7 +702,7 @@ async def h_landing(request):
                   ' &mdash; save progress &amp; join the leaderboard across sessions')
     else:
         signin = ""
-    sid = request.cookies.get(COOKIE)
+    sid = resolve_sid(request)
     if sid in sessions and outdated(sessions[sid]):
         lvl = reached_level(sessions[sid])
         signin = (f'<b>Dave\'s box got an update.</b> Press play to continue on the new version'
@@ -716,26 +748,30 @@ async def verify_turnstile(token: str, ip: str) -> bool:
 async def h_play(request):
     """POST only: find-or-create this visitor's container. A GET can never spawn
     (so crawlers / prefetch / a one-line loop can't fill every seat)."""
-    sid = request.cookies.get(COOKIE)
+    uid, disp = identity(request)
+    sid = resolve_sid(request)
     # returning visitor on a replaced image → new container at the level they
     # reached (known server-side). It replaces a seat, so no bot check/throttle.
     if sid and sid in sessions and outdated(sessions[sid]):
         lvl = reached_level(sessions[sid])
+        owner = who.get(sid)
         await teardown(sid, "upgrade")
-        uid, disp = identity(request)
-        who[sid] = {"uid": uid, "display": disp}
+        who[sid] = owner or {"uid": uid, "display": disp}
+        remember(sid, uid, disp)
         resume_req[sid] = ({}, lvl, "the server was updated - " +
                            (f"resumed you at level {lvl}" if lvl else "you're on the new version"))
         states[sid] = "pending"
         asyncio.create_task(provision_bg(sid))
-        return web.Response(text=SPAWNING.replace("__SID__", sid), content_type="text/html")
-    # returning visitor whose container is still alive → straight in, no new spawn
-    if sid and sid in sessions:
-        uid, disp = identity(request)
-        who[sid] = {"uid": uid, "display": disp}
-        resp = web.HTTPFound(f"/app/{sid}")
-        resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", path="/", max_age=MAX_LIFE)
-        return resp
+        return with_cookie(web.Response(text=SPAWNING.replace("__SID__", sid),
+                                        content_type="text/html"), sid)
+    # returning visitor (this device or another one signed in to the same
+    # account) whose box is alive or starting → straight in, no new spawn
+    if sid and (sid in sessions or states.get(sid) == "pending"):
+        remember(sid, uid, disp)
+        if sid in sessions:
+            return with_cookie(web.HTTPFound(f"/app/{sid}"), sid)
+        return with_cookie(web.Response(text=SPAWNING.replace("__SID__", sid),
+                                        content_type="text/html"), sid)
     ip = client_ip(request)
     form = await request.post()
     # bot check before we spend a container (no-op until the secret is configured)
@@ -746,24 +782,21 @@ async def h_play(request):
     if throttled(ip):
         return web.Response(text=SLOWDOWN, content_type="text/html", status=429)
     sid = sid or secrets.token_hex(16)
-    uid, disp = identity(request)
     who[sid] = {"uid": uid, "display": disp}
-    if sid not in sessions and states.get(sid) != "pending":
-        if form.get("mode") == "resume":
-            resume_req[sid] = (parse_save(form.get("save", "")), server_level(uid))
-        states[sid] = "pending"
-        asyncio.create_task(provision_bg(sid))
-    resp = web.Response(text=SPAWNING.replace("__SID__", sid), content_type="text/html")
-    resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", path="/", max_age=MAX_LIFE)
-    return resp
+    if form.get("mode") == "resume":
+        resume_req[sid] = (parse_save(form.get("save", "")), server_level(uid))
+    states[sid] = "pending"
+    asyncio.create_task(provision_bg(sid))
+    return with_cookie(web.Response(text=SPAWNING.replace("__SID__", sid),
+                                    content_type="text/html"), sid)
 
 
 async def h_play_get(request):
     """A GET must never create a container. Live sessions go to their terminal;
     everyone else goes back to the landing page to press Play (which POSTs)."""
-    sid = request.cookies.get(COOKIE)
+    sid = resolve_sid(request)
     if sid and sid in sessions and not outdated(sessions[sid]):
-        return web.HTTPFound(f"/app/{sid}")
+        return with_cookie(web.HTTPFound(f"/app/{sid}"), sid)
     return web.HTTPFound("/")
 
 
@@ -775,10 +808,15 @@ async def h_ready(request):
 
 
 def owns(request, sid: str) -> bool:
-    """True if this request carries the session cookie for `sid`. The sid is
-    also in the URL, so this binds a terminal to its owner: a leaked /app/<sid>
-    or /t/<sid>/ URL is useless without the matching httponly `hid` cookie."""
-    return request.cookies.get(COOKIE) == sid
+    """True if this request carries the session cookie for `sid`, or is signed
+    in to the GitHub account that owns it. The sid is also in the URL, so this
+    binds a terminal to its owner: a leaked /app/<sid> or /t/<sid>/ URL is
+    useless without the matching httponly `hid` cookie or account."""
+    uid = identity(request)[0]
+    owner = who.get(sid, {}).get("uid")
+    if uid and owner and uid != owner:   # signed in as someone else: never theirs
+        return False
+    return request.cookies.get(COOKIE) == sid or (bool(uid) and uid == owner)
 
 
 async def h_app(request):
@@ -940,6 +978,7 @@ async def h_callback(request):
 async def h_logout(request):
     resp = web.HTTPFound("/")
     resp.del_cookie("ghid", path="/")
+    resp.del_cookie(COOKIE, path="/")   # the box stays with the account, not this device
     return resp
 
 
@@ -965,6 +1004,8 @@ async def on_start(app):
         if rc != 0:
             continue  # container is gone; drop it
         start = s.get("start", 0)
+        if s.get("who"):
+            who[sid] = s["who"]
         proc = await start_ttyd(sid, s["ct"], s["port"], login_user(start))
         sessions[sid] = {"ct": s["ct"], "port": s["port"], "proc": proc,
                          "created": s.get("created", time.time()), "last": time.time(),
