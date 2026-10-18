@@ -69,7 +69,7 @@ and a remote plan as `tf-handover` reports no changes. The local state is gone.
 6. **Guards stay.** `prevent_destroy` + `ignore_changes` already stop a plan
    from replacing the live box.
 
-## Phase 3 — host config as code (the real gap)
+## Phase 3 — host config as code ✅ done 2026-10-18 (`host/site.yml`)
 
 1. **Ansible playbook** `host/site.yml` in handover-hosting describing
    everything done by hand: Incus init, `games` btrfs pool (30 GiB), `isolated`

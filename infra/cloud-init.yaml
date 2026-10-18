@@ -1,80 +1,15 @@
 #cloud-config
-# First-boot provisioning for the Handover host. Captures the steps that were
-# done by hand (Incus, the storage pool, the isolated profile, cloudflared). It
-# installs NO secrets and builds nothing: after boot, bandit-wannabe's
-# deploy-image workflow ships the game image, and deploy.yml here delivers the
-# spawner, the tunnel config and the secrets.
+# First boot only does the minimum. Everything the host needs (packages, Incus
+# pool + isolated profile, sysctls, fail2ban, systemd units) is host/site.yml,
+# which deploy.yml applies on every deploy, so a fresh box and the live box are
+# configured by the same code. No secrets here either.
 #
-# NOTE: this is a faithful transcription of the manual build; it still wants one
-# real boot to shake out ordering/timing before you rely on it for a rebuild.
-
+# After `terraform apply` creates a box:
+#   1. update the DEPLOY_HOST secret (both repos) if the IP changed
+#   2. gh workflow run deploy.yml -R BarryPekerman/handover-hosting
+#      (host config + spawner; Incus has to exist before an image can land)
+#   3. gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<latest passing ci on main>
+#   Tunnel credentials for a fresh box are still a manual step (infra/README.md).
 package_update: true
-packages:
-  - incus
-  - incus-client
-  - ttyd
-  - python3-aiohttp
-  # Ban hosts that hammer SSH. The host is key-only so this isn't about
-  # stopping credential brute-force (there's nothing to guess); it caps the
-  # log noise and connection churn from the constant internet background scan.
-  - fail2ban
-
-write_files:
-  # Each nested in-game `ssh levelN@localhost` starts a systemd --user manager;
-  # they pile up and exhaust inotify instances ("Too many open files") by ~level
-  # 2 at the stock 128. Raise the host ceiling (it backs every container's users).
-  - path: /etc/sysctl.d/99-handover.conf
-    permissions: "0644"
-    content: |
-      fs.inotify.max_user_instances = 1024
-      fs.inotify.max_user_watches = 524288
-  # fail2ban: watch sshd, ban an IP for an hour after 5 failures in 10 min.
-  - path: /etc/fail2ban/jail.local
-    permissions: "0644"
-    content: |
-      [sshd]
-      enabled  = true
-      backend  = systemd
-      maxretry = 5
-      findtime = 10m
-      bantime  = 1h
-
-runcmd:
-  - sysctl --system    # apply the inotify limits above before anything runs
-  - systemctl enable --now fail2ban || true
-  - systemctl restart fail2ban || true   # pick up jail.local written above
-  # rpcbind (portmapper, :111) gets pulled in as a dependency but the game uses
-  # no NFS/RPC. It's an unused daemon and a classic DDoS reflection vector, so
-  # turn it off. (It's cloud-firewalled too, but don't run what you don't need.)
-  - systemctl disable --now rpcbind.service rpcbind.socket || true
-  - systemctl mask rpcbind.service rpcbind.socket || true
-  # --- Incus ---
-  - systemctl enable --now incus || true
-  - incus admin init --minimal
-  # No bridge egress rules: player containers have no NIC, and the image is
-  # built in CI, so nothing on this host needs container networking.
-  - usermod -aG incus-admin ubuntu
-
-  # --- storage: a btrfs pool for player containers so we can enforce a per-
-  #     container disk quota. The default 'dir' pool has NO size limit, so a
-  #     player could fill the host disk with many sub-ulimit files. btrfs also
-  #     shares the base image copy-on-write, so N containers cost ~1x rootfs +
-  #     their own write-deltas, not N full copies. Loop-backed, sparse; the
-  #     30GiB cap is the hard host-protecting ceiling. ---
-  - incus storage create games btrfs size=30GiB
-
-  # --- isolated profile: NIC-less containers + per-player caps ---
-  - incus profile create isolated
-  - incus profile device add isolated root disk pool=games path=/ size=2GiB
-  - incus profile device add isolated eth0 none
-  - incus profile set isolated limits.cpu.allowance=50% limits.memory=512MiB limits.processes=300
-  # Disable the guest API (/dev/incus/sock): the game never uses it and it
-  # otherwise leaks the host instance name into every container.
-  - incus profile set isolated security.guestapi=false
-
-  # --- cloudflared (tunnel creds come later via CD, not here) ---
-  - bash -c 'curl -fsSL -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb && dpkg -i /tmp/cloudflared.deb'
-
-  # --- the spawner, its unit, the tunnel config + all secrets are delivered by
-  #     the CD workflow (deploy.yml) after this box is up. ---
-final_message: "Handover host base ready. Run deploy-image (bandit-wannabe), then deploy.yml here."
+package_upgrade: true
+final_message: "Handover host up. Run deploy.yml (host config + spawner), then deploy-image."

@@ -39,8 +39,8 @@ top. Not player-facing.
 
 Everything working. Image and spawner ship through the pipelines; Terraform
 runs in Terraform Cloud as the scoped OCI user `tf-handover` (instance in
-compartment `handover`). Next: host config as code (`docs/pipeline-plan.md`,
-phase 3).
+compartment `handover`). Host config is `host/site.yml`, applied by
+`deploy.yml`.
 
 ## Operator playbook
 
@@ -80,8 +80,9 @@ hand. The game image ships the same way from bandit-wannabe: a `ci` run on
 `main` builds and tests it, then
 `gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<id>`
 imports it and moves the `handover` alias (previous kept as `handover-prev`).
-Host setup changes go in `infra/cloud-init.yaml` too, so a rebuild matches
-(the live box was set up by hand; cloud-init only runs at first boot).
+Host setup changes go in `host/site.yml` (Ansible), never by hand: `deploy.yml`
+applies it on every deploy. Dry run from a laptop:
+`ansible-playbook -i 84.13.72.156, -u ubuntu --private-key ~/.ssh/handover host/site.yml --check --diff`.
 
 ## Known gotchas / non-bugs (seen this session)
 

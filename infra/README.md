@@ -1,11 +1,10 @@
 # infra — Terraform + cloud-init for the Handover host
 
 Describes the OCI box as code: a VM.Standard.A1.Flex (4 OCPU / 24 GB) running
-Ubuntu 24.04, provisioned on first boot by `cloud-init.yaml` (Incus, the
-storage pool, the `isolated` profile, cloudflared, fail2ban). **No secrets and
-no game build live here**: after boot, bandit-wannabe's `deploy-image` workflow
-ships the game image, and `deploy.yml` delivers the spawner, tunnel config and
-secrets.
+Ubuntu 24.04. `cloud-init.yaml` only updates packages on first boot; the host
+is configured by `../host/site.yml`, which `deploy.yml` applies, followed by
+bandit-wannabe's `deploy-image` for the game image. **No secrets and no game
+build live here.**
 
 Networking (VCN/subnet) is **referenced, not managed** (`subnet_ocid`), so
 Terraform won't touch the existing network. Only the instance is managed.
@@ -56,11 +55,12 @@ knowingly:
 terraform apply    # creates the instance; cloud-init provisions it
 ```
 
-Then deliver the game image and the app + secrets:
+Then configure the host and deliver the app, secrets and game image (in this
+order: the image needs Incus):
 
 ```sh
-gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<latest passing ci run on main>
 gh workflow run deploy.yml -R BarryPekerman/handover-hosting
+gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<latest passing ci run on main>
 ```
 
 ## What's still manual / TODO
