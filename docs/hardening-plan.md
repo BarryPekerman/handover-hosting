@@ -42,16 +42,16 @@ what's done when it's done.
 
 ## 4. Spawner safety net
 
-- [ ] **4a. Unit tests in CI** for the pure logic: `parse_save`, `solve_time`,
+- [x] **4a. Unit tests in CI** (done: `tests/test_spawner.py`, 13 tests) for the pure logic: `parse_save`, `solve_time`,
   `resolve_sid`/`owns`, `choose_start`, `outdated`.
-- [ ] **4b. Commit the VM regression harness** (fake `incus` that forwards to the
+- [x] **4b. Commit the VM regression harness** (done: `tests/vm/run.sh`) (fake `incus` that forwards to the
   Vagrant VM, plus the six end-to-end scenarios) as a manual test.
 
 ## 5. Smaller fixes
 
-- [ ] **5a. Disk overcommit:** 20 seats × 2 GiB quota = 40 GiB on a 30 GiB pool.
+- [x] **5a. Disk overcommit:** measured ~70 MiB per player; quota now 1 GiB (applies at the next deploy). 20 seats × 2 GiB quota = 40 GiB on a 30 GiB pool.
   Measure real per-container usage, then size the pool or the quota so they fit.
-- [ ] **5b. Leaderboard audit:** rows written before the `_EXE` fix may be forged.
+- [~] **5b. Leaderboard audit:** found a 0-second finish (straight to `dave`); runs that skip levels are now unranked. Old bogus row: pending decision. rows written before the `_EXE` fix may be forged.
 - [ ] **5c. One branch:** retire bandit-wannabe's `local-rebuild`; work on `main`.
 
 ## 6. Monitoring (separate phase)

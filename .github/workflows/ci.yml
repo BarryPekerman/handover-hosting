@@ -17,6 +17,11 @@ jobs:
           persist-credentials: false
       - name: Spawner compiles
         run: python3 -m py_compile spawner/spawner.py
+      # aiohttp pinned to the host's version (Ubuntu 24.04's python3-aiohttp).
+      - name: Spawner unit tests
+        run: |
+          python3 -m pip install --user "pytest==9.1.1" "aiohttp==3.9.1"
+          python3 -m pytest -q tests/test_spawner.py
       - name: Install Ansible + ansible-lint (pinned)
         run: python3 -m pip install --user "ansible-core==2.21.5" "ansible-lint==26.9.0"
       - name: Host playbook lints
