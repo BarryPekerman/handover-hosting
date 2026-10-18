@@ -46,13 +46,13 @@ same across builds.
 6. Add the `DEPLOY_HOST` / `DEPLOY_SSH_KEY` secrets to bandit-wannabe (same
    values as handover-hosting).
 
-## Phase 2 — Terraform on Terraform Cloud (handover-hosting `infra/`) — in progress
+## Phase 2 — Terraform on Terraform Cloud (handover-hosting `infra/`) ✅ done 2026-10-18
 
 Done: TFC project/workspace + variables, `tf-handover` user/group/policy,
 compartment `handover`, `cloud {}` backend, `terraform.yml` (PR plan, manual
 apply). Driven from GitHub Actions with a team token, so no VCS connection.
-Left: move the instance into `handover`, migrate the state, confirm a no-op
-plan, delete the local state.
+The instance was moved into `handover` (no reboot), the state pushed to TFC,
+and a remote plan as `tf-handover` reports no changes. The local state is gone.
 
 1. **Workspace.** TFC org + workspace `handover-infra`, `cloud {}` block in
    `main.tf`, remote execution, auto-apply **off**.

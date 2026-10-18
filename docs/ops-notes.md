@@ -37,9 +37,10 @@ top. Not player-facing.
 
 ## Current state (2026-10-18)
 
-Everything working. Image and spawner ship through the pipelines. Terraform
-state is moving to Terraform Cloud (pending: move the instance into compartment
-`handover`, then migrate the local state); see `docs/pipeline-plan.md`.
+Everything working. Image and spawner ship through the pipelines; Terraform
+runs in Terraform Cloud as the scoped OCI user `tf-handover` (instance in
+compartment `handover`). Next: host config as code (`docs/pipeline-plan.md`,
+phase 3).
 
 ## Operator playbook
 
@@ -139,7 +140,8 @@ fail2ban on sshd. Host SSH is key-only.
 - **2026-10-18** (deployed through the new pipelines unless marked):
   - Pipelines: image built/tested in bandit-wannabe CI and shipped by
     `deploy-image`; spawner deploy manual-only; Terraform on TFC with a scoped
-    OCI user `tf-handover` (state migration pending).
+    OCI user `tf-handover`; instance moved into compartment `handover`, state
+    migrated, remote plan is a no-op.
   - Spawner: graceful moves onto a new image. (Not yet deployed: a signed-in
     player's box follows their GitHub account across devices; cleanup sweep.)
   - MOTD no longer shows a pager hint.
