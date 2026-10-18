@@ -25,16 +25,21 @@ top. Not player-facing.
   `isolated` profile — no NIC, `security.guestapi=false`, CPU 50% / mem 512 MiB
   / procs 300, **2 GiB btrfs disk quota** (pool `games`, 30 GiB loop ceiling).
 - **Code:** hosting (spawner, cloudflared, infra/terraform, this doc) lives in
-  **`handover-hosting`**; the game itself (Ansible that builds the image) lives
-  in **`bandit-wannabe`** (`scripts/incus-image.sh build` publishes the
-  `handover` image on the host).
+  **`handover-hosting`**; the game itself lives in **`bandit-wannabe`**, whose CI
+  builds the arm64 `handover` image and whose `deploy-image` workflow ships it.
+  Nothing is built on the host.
+- **Deploys:** all manual `gh workflow run` (that's the approval): `deploy.yml`
+  here (spawner), `deploy-image.yml` in bandit-wannabe (image),
+  `terraform.yml` here (infra, via Terraform Cloud `Berries-/handover`).
 - **Secrets:** `/home/ubuntu/handover-spawner.env` (git-ignored, host-only):
   `SESSION_SECRET`, `GH_CLIENT_SECRET`, `TURNSTILE_SECRET`. Tunnel creds are
   cloudflared's. Nothing sensitive is in git or the image.
 
-## Current state (2026-10-17)
+## Current state (2026-10-18)
 
-Everything working; CI green; box hardened and tidy. No known blocking bugs.
+Everything working. Image and spawner ship through the pipelines. Terraform
+state is moving to Terraform Cloud (pending: move the instance into compartment
+`handover`, then migrate the local state); see `docs/pipeline-plan.md`.
 
 ## Operator playbook
 
@@ -74,9 +79,8 @@ hand. The game image ships the same way from bandit-wannabe: a `ci` run on
 `main` builds and tests it, then
 `gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<id>`
 imports it and moves the `handover` alias (previous kept as `handover-prev`).
-Infra changes go in
-`infra/cloud-init.yaml` for rebuild reproducibility (the live box was built by
-hand; cloud-init mirrors it).
+Host setup changes go in `infra/cloud-init.yaml` too, so a rebuild matches
+(the live box was set up by hand; cloud-init only runs at first boot).
 
 ## Known gotchas / non-bugs (seen this session)
 
@@ -88,17 +92,22 @@ hand; cloud-init mirrors it).
   (ttyd is killed + respawned; the container survives via re-adopt). Brief blip,
   not data loss.
 - **Idle reaper = 60 min** (`IDLE_MIN`), max lifetime 1440 min. Idle containers
-  disappear; a returning player gets a fresh container.
+  disappear; a returning player gets a fresh container (and can resume).
+- **After an image deploy** boxes on the old image are recycled once idle for
+  5 min (`OUTDATED_IDLE_MIN`); active players move over on their next reload
+  or Play, at the level they reached.
 - **One shared password set:** every container is a clone of the same golden
   image, so all level passwords are identical across players/sessions. A
   player's "progress" is just the passwords they've collected; any fresh
   container works when they return. The spawner saves them for the player
-  (`/save/<sid>` → localStorage) and checks them on resume, so rebuilding the
-  image invalidates every save: players see "doesn't match this server" and
-  start from level 0.
-- **Session access is cookie-bound:** `/app/<sid>` and `/t/<sid>/` require the
-  httponly `hid` cookie to match the URL sid. Clearing cookies mid-game means
-  pressing Play again.
+  (`/save/<sid>` → localStorage) and checks them on resume. Release builds use
+  the same passwords (secret `HANDOVER_CREDENTIALS`), so saves survive image
+  deploys; rotating that secret resets every save ("doesn't match this
+  server").
+- **Whose box:** `/app/<sid>` and `/t/<sid>/` require the httponly `hid` cookie
+  to match the URL sid, or a sign-in as the GitHub account that owns the box.
+  Signed-in players get the same box on every device; anonymous ones lose it
+  with their cookies (a new box, then resume).
 
 ## Hardening posture (break-tested)
 
@@ -127,7 +136,13 @@ fail2ban on sshd. Host SSH is key-only.
 
 ## Change log
 
-- **2026-10-18** (unreleased; committed, not deployed):
+- **2026-10-18** (deployed through the new pipelines unless marked):
+  - Pipelines: image built/tested in bandit-wannabe CI and shipped by
+    `deploy-image`; spawner deploy manual-only; Terraform on TFC with a scoped
+    OCI user `tf-handover` (state migration pending).
+  - Spawner: graceful moves onto a new image. (Not yet deployed: a signed-in
+    player's box follows their GitHub account across devices; cleanup sweep.)
+  - MOTD no longer shows a pager hint.
   - Resume from the browser save (see gotchas). Resumed runs set `unranked` in
     the leaderboard DB (column added on startup).
   - Progress check only counts su records with `_EXE=/usr/bin/su`. Before, any
@@ -135,7 +150,7 @@ fail2ban on sshd. Host SSH is key-only.
     level20"` and climb the leaderboard. Rows written before this fix may be
     forged.
   - `bandit-wannabe` `0f3f868`: plain `mail` shows Dave's note directly
-    (playtester got lost in the mailx prompt). Needs an image rebuild.
+    (playtester got lost in the mailx prompt).
 
 - **2026-10-17** (this session):
   - `bandit-wannabe` `9156bad`: removed the dead AWS/EC2/Terraform deploy path;

@@ -303,6 +303,12 @@ def with_cookie(resp, sid: str):
     return resp
 
 
+def spinner(sid: str):
+    """The "spinning up" page, which polls /ready and then opens the terminal."""
+    return with_cookie(web.Response(text=SPAWNING.replace("__SID__", sid),
+                                    content_type="text/html"), sid)
+
+
 def throttled(ip: str) -> bool:
     """True if this IP has started too many containers lately (records a hit if not)."""
     now = time.time()
@@ -533,25 +539,21 @@ session resets, come back here and resume.</p>
 </script>
 </body></html>"""
 
-FULL = """<!doctype html><html><head><meta charset=utf-8><title>Server full</title>
-<style>body{background:#000;color:#ff5555;font-family:monospace;display:flex;height:100vh;
-align-items:center;justify-content:center;text-align:center}</style></head><body>
-<div><h1>server full</h1><p>All seats are taken right now. Try again in a few minutes.</p></div>
-</body></html>"""
+def message_page(title: str, heading: str, body: str, color: str) -> str:
+    """A one-message page (slow down, failed bot check)."""
+    return (f"""<!doctype html><html><head><meta charset=utf-8><title>{title}</title>
+<style>body{{background:#000;color:{color};font-family:monospace;display:flex;height:100vh;
+align-items:center;justify-content:center;text-align:center}}a{{color:{color}}}</style></head>
+<body><div><h1>{heading}</h1><p>{body}</p></div></body></html>""")
 
-SLOWDOWN = """<!doctype html><html><head><meta charset=utf-8><title>Slow down</title>
-<style>body{background:#000;color:#ffcc33;font-family:monospace;display:flex;height:100vh;
-align-items:center;justify-content:center;text-align:center}</style></head><body>
-<div><h1>easy there</h1><p>You've started a few servers in a short time. Give it a
-couple of minutes, then <a style=color:#ffcc33 href="/">head back</a> and press Play.</p></div>
-</body></html>"""
 
-TS_FAIL = """<!doctype html><html><head><meta charset=utf-8><title>Are you human?</title>
-<style>body{background:#000;color:#ff5555;font-family:monospace;display:flex;height:100vh;
-align-items:center;justify-content:center;text-align:center}</style></head><body>
-<div><h1>couldn't verify you</h1><p>The human check didn't pass. <a style=color:#ff5555
-href="/">go back</a> and press Play again.</p></div>
-</body></html>"""
+SLOWDOWN = message_page("Slow down", "easy there",
+                        "You've started a few servers in a short time. Give it a couple of "
+                        'minutes, then <a href="/">head back</a> and press Play.', "#ffcc33")
+TS_FAIL = message_page("Are you human?", "couldn't verify you",
+                       'The human check didn\'t pass. <a href="/">go back</a> and press Play again.',
+                       "#ff5555")
+
 
 LEADERBOARD = """<!doctype html><html><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
@@ -705,7 +707,7 @@ async def h_landing(request):
     sid = resolve_sid(request)
     if sid in sessions and outdated(sessions[sid]):
         lvl = reached_level(sessions[sid])
-        signin = (f'<b>Dave\'s box got an update.</b> Press play to continue on the new version'
+        signin = ('<b>Dave\'s box got an update.</b> Press play to continue on the new version'
                   + (f" at level {lvl}" if lvl else "") + ".<br>" + signin)
     page = (LANDING.replace("__TS_SCRIPT__", script)
                    .replace("__TS_WIDGET__", widget)
@@ -762,16 +764,14 @@ async def h_play(request):
                            (f"resumed you at level {lvl}" if lvl else "you're on the new version"))
         states[sid] = "pending"
         asyncio.create_task(provision_bg(sid))
-        return with_cookie(web.Response(text=SPAWNING.replace("__SID__", sid),
-                                        content_type="text/html"), sid)
+        return spinner(sid)
     # returning visitor (this device or another one signed in to the same
     # account) whose box is alive or starting → straight in, no new spawn
     if sid and (sid in sessions or states.get(sid) == "pending"):
         remember(sid, uid, disp)
         if sid in sessions:
             return with_cookie(web.HTTPFound(f"/app/{sid}"), sid)
-        return with_cookie(web.Response(text=SPAWNING.replace("__SID__", sid),
-                                        content_type="text/html"), sid)
+        return spinner(sid)
     ip = client_ip(request)
     form = await request.post()
     # bot check before we spend a container (no-op until the secret is configured)
@@ -787,8 +787,7 @@ async def h_play(request):
         resume_req[sid] = (parse_save(form.get("save", "")), server_level(uid))
     states[sid] = "pending"
     asyncio.create_task(provision_bg(sid))
-    return with_cookie(web.Response(text=SPAWNING.replace("__SID__", sid),
-                                    content_type="text/html"), sid)
+    return spinner(sid)
 
 
 async def h_play_get(request):

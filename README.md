@@ -8,24 +8,15 @@ image; this project only does hosting.
 
 ## Host prerequisites (OCI A1, Ubuntu 24.04 ARM)
 
-- Incus (`sudo apt install incus`, `incus admin init --minimal`), user in `incus-admin`.
-- **OCI firewall holes for the bridge** (OCI's stock iptables REJECTs the bridge):
-  ```
-  sudo iptables -I INPUT  -i incusbr0 -j ACCEPT
-  sudo iptables -I FORWARD -i incusbr0 -j ACCEPT
-  sudo iptables -I FORWARD -o incusbr0 -j ACCEPT
-  sudo iptables -t nat -A POSTROUTING -s <bridge-cidr> ! -o incusbr0 -j MASQUERADE
-  sudo netfilter-persistent save
-  ```
-- The game image present as alias `handover` (built by `bandit-wannabe/scripts/incus-image.sh build` on this ARM host).
-- `ttyd` (>=1.7, past the old CVE) and `python3-aiohttp`.
-- A `games` btrfs storage pool so player containers get a per-container disk
-  quota (the `dir` pool can't; btrfs also CoW-shares the base image):
-  ```
-  incus storage create games btrfs size=30GiB
-  ```
-- The `isolated` profile (NIC-less + per-player CPU/mem/proc/disk caps, guest
-  API off so the host name doesn't leak into containers):
+`infra/cloud-init.yaml` sets these up on a fresh box; the live box was set up by
+hand to match.
+
+- Incus (`incus admin init --minimal`), `ubuntu` in `incus-admin`.
+- `ttyd` (>=1.7, past the old CVE), `python3-aiohttp`, `fail2ban`, rpcbind masked,
+  `fs.inotify.max_user_instances=1024`.
+- A `games` btrfs pool (per-container disk quota; CoW-shares the base image):
+  `incus storage create games btrfs size=30GiB`
+- The `isolated` profile: no NIC, per-player caps, guest API off.
   ```
   incus profile create isolated
   incus profile device add isolated root disk pool=games path=/ size=2GiB
@@ -33,30 +24,45 @@ image; this project only does hosting.
   incus profile set isolated limits.cpu.allowance=50% limits.memory=512MiB limits.processes=300
   incus profile set isolated security.guestapi=false
   ```
+- The game image as alias `handover`. It is **not built here**: `bandit-wannabe`'s
+  CI builds and tests it, and its `deploy-image` workflow imports it and moves
+  the alias (the previous image stays as `handover-prev`).
 
 ## Spawner
 
-`spawner/spawner.py` — one file, aiohttp. Each visitor (cookie `hid`) gets a
-container `p-<sid>` launched from `handover` on the `isolated` profile, plus a
-ttyd on a loopback port; the spawner reverse-proxies HTTP **and the terminal
-WebSocket** under `/t/<sid>/`. Global cap with a "server full" page; a reaper
-deletes containers after idle / max-lifetime; stopping the service tears down
-every live container.
+`spawner/spawner.py`, one aiohttp file. A visitor's box is a container
+`p-<sid>` launched from `handover` on the `isolated` profile, plus a ttyd on a
+loopback port; the spawner reverse-proxies HTTP **and the terminal WebSocket**
+under `/t/<sid>/`.
 
-Routes: `/` landing · `/play` find-or-create + redirect · `/t/<sid>/*` proxy · `/healthz`.
+- **Whose box:** the `hid` cookie, or for a signed-in player their GitHub
+  account, so every device signed in to that account gets the same box (each
+  connection its own shell).
+- **Saves and resume:** the spawner reads each reached level's password from the
+  container; the page keeps them in localStorage. "Resume at level N" starts a
+  new box at the highest saved level whose password matches. Resumed runs are
+  kept off the leaderboard.
+- **Image updates:** after an image deploy, idle boxes on the old image are
+  recycled after `OUTDATED_IDLE_MIN`; an active player moves over on their
+  next reload or Play, at the level they reached.
+- **Leaderboard:** progress comes from each container's own login records;
+  GitHub sign-in (optional) keys it across sessions.
+- **Abuse:** POST-only spawning, Turnstile, a per-IP throttle, a seat cap.
+- **Restarts are non-destructive:** live containers are re-adopted.
 
-Config (env, see `handover-spawner.service`): `LISTEN_HOST/PORT`, `BASE_IMAGE`,
-`PROFILE`, `MAX_PLAYERS`, `IDLE_MIN`, `MAX_LIFETIME_MIN`, `TTYD_PORT_BASE`, `LOGIN_USER`.
+Routes: `/` landing · `POST /play` find-or-create · `/ready` · `/app/<sid>`
+terminal page · `/t/<sid>/*` ttyd proxy · `/save/<sid>` · `/leaderboard` ·
+`/login` `/auth/callback` `/logout` · `/healthz`.
 
-### Install as a service
+Config is env (see `handover-spawner.service` and the docstring at the top of
+`spawner.py`); secrets come from `/home/ubuntu/handover-spawner.env`, written by CD.
 
-```
-scp spawner/spawner.py ubuntu@HOST:~/spawner.py
-scp spawner/handover-spawner.service ubuntu@HOST:/tmp/
-ssh ubuntu@HOST 'sudo mv /tmp/handover-spawner.service /etc/systemd/system/ \
-  && sudo systemctl daemon-reload && sudo systemctl enable --now handover-spawner'
-curl -s HOST:8080/healthz   # {"players":0,"max":20}
-```
+### Deploying
+
+Manual on purpose (starting it is the approval):
+`gh workflow run deploy.yml -R BarryPekerman/handover-hosting` copies the
+spawner, unit and tunnel config, writes the secrets and restarts the service.
+Pushes only run `ci.yml`. Infra: `infra/README.md`.
 
 ## Isolation
 
@@ -65,30 +71,14 @@ rides `incus exec` over the control socket, so a player reaches neither other
 players, the host, nor the internet. Isolation is by absence, not by firewall
 rule. Verified: a player container has only `lo`.
 
-## Status
+## Open
 
-- [x] Spawner: per-player isolated container, one-port HTTP+WS proxy, cookie
-      identity, global cap, return-visitor stickiness, and **non-destructive
-      restarts** (re-adopts live containers + respawns ttyd on boot).
-- [x] Instant "spinning up…" spinner (provisions in the background).
-- [x] Browser UX: terminal + a localStorage **notes panel** (survives resets,
-      never sent to the server).
-- [x] **Resume:** the browser saves each reached level's password in
-      localStorage; "resume at level N" starts the terminal at the highest
-      saved level whose password matches the container's. Bad entries are
-      dropped; resumed runs are kept off the leaderboard.
-- [x] Ingress: Cloudflare Tunnel (`cloudflared`) → `localhost:8080`; **no inbound
-      ports** on the box.
-- [x] DNS: live at **https://play.barrypekerman.com**.
-- [x] Abuse hardening: container creation is **POST-only** + a per-IP throttle
-      (keyed on `CF-Connecting-IP`), so crawlers/loops can't fill the seats.
-- [ ] Turnstile on the Play button + a Cloudflare per-IP rate-limit rule on
-      `/play` (both configured in the Cloudflare dashboard).
-- [ ] Lock the OCI security list to the admin IP (script staged).
 - [ ] Mobile key-bar (Esc/Ctrl/Tab/arrows) for phone play.
-- [ ] Analytics at teardown (playtime rows → SQLite).
-- [ ] btrfs/ZFS pool for ~1s CoW clones (currently `dir`: whole-rootfs copy).
-- [ ] Image-update propagation: a returning visitor keeps their existing
-      container, so a rebuilt image doesn't reach them until it recycles.
+- [ ] Host config as code (Ansible) instead of hand setup + first-boot cloud-init
+      (`docs/pipeline-plan.md`, phase 3).
+- [ ] Lock the OCI security list to the admin IP (parked: the admin IP rotates;
+      fail2ban covers the noise).
 
-See `bandit-wannabe/HOSTING.md` for the full design.
+Day-to-day operation: `docs/ops-notes.md`.
+
+Design rationale: `bandit-wannabe/HOSTING.md`.
