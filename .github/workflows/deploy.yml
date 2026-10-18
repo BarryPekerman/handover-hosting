@@ -1,13 +1,14 @@
 name: deploy
 
-# Push to master (spawner/tunnel changes) → redeploy to the host and inject the
-# Turnstile secret from GitHub Secrets. The hostile game box is never a secrets
+# Redeploys the spawner, its unit and the tunnel config to the host, and injects
+# the app secrets from GitHub Secrets. The hostile game box is never a secrets
 # client: CD (trusted) pushes a rendered env file to it. Swap GitHub Secrets for
 # HashiCorp Vault here later without touching the host (box never calls Vault).
+#
+# Manual on purpose: starting it is the approval for a production deploy.
+#   gh workflow run deploy.yml -R BarryPekerman/handover-hosting
+# Pushes to master only run the checks in ci.yml.
 on:
-  push:
-    branches: [master]
-    paths: ["spawner/**", "cloudflared/**", ".github/workflows/deploy.yml"]
   workflow_dispatch:
 
 concurrency: deploy        # never overlap two deploys

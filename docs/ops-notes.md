@@ -54,9 +54,11 @@ journalctl -u handover-spawner -f                     # follow
 # safe restart (graceful; WS close + 5s timeout, re-adopts live containers)
 sudo systemctl restart handover-spawner
 
-# rebuild the game image (ON THE HOST, aarch64) after game changes land
-cd ~ubuntu/bandit-wannabe && git fetch && git reset --hard origin/local-rebuild && \
-  PATH=$HOME/.local/bin:$PATH ./scripts/incus-image.sh build   # as ubuntu
+# game image: shipped by bandit-wannabe's deploy-image workflow (not built here)
+incus image list -c lfsu                              # handover = live, handover-prev = rollback
+# rollback to the previous image:
+incus query -X PATCH /1.0/images/aliases/handover \
+  -d "{\"target\":\"$(incus image info handover-prev | awk '/^Fingerprint/{print $2}')\"}"
 
 # profile / pool config that backs the containers
 incus profile show isolated
@@ -64,11 +66,15 @@ incus storage list
 fail2ban-client status sshd
 ```
 
-Deploying spawner changes: push to `master`. `.github/workflows/deploy.yml`
+Deploying spawner changes: `gh workflow run deploy.yml` (manual = the approval;
+pushes to `master` only run `ci.yml`). `.github/workflows/deploy.yml`
 copies `spawner/`, the unit and the tunnel config to the host, writes the
 secrets env file from GitHub Secrets and restarts the spawner. Don't scp by
-hand; the next push would overwrite it anyway. The game image has no CD: build
-it on the host (above). Infra changes go in
+hand. The game image ships the same way from bandit-wannabe: a `ci` run on
+`main` builds and tests it, then
+`gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<id>`
+imports it and moves the `handover` alias (previous kept as `handover-prev`).
+Infra changes go in
 `infra/cloud-init.yaml` for rebuild reproducibility (the live box was built by
 hand; cloud-init mirrors it).
 
