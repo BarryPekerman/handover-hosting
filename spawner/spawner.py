@@ -2,25 +2,49 @@
 """The Handover spawner: one isolated Incus container per browser visitor,
 fronted by a single localhost port (Cloudflare tunnel terminates upstream).
 
-Flow:
-  GET  /            landing page with a Play button
-  POST /play        find-or-create this visitor's container + ttyd (mode=resume
-                    starts it at the highest level the browser's save proves)
-  GET  /save/<sid>  passwords of the levels reached so far, for the browser's save
-  ANY  /t/<sid>/*   reverse-proxy (HTTP + WebSocket) to that session's ttyd
+Routes:
+  GET  /                 landing page (Play / resume, sign-in, update notice)
+  POST /play             find-or-create this visitor's box: by GitHub account or
+                         the `hid` cookie; mode=resume starts it at the highest
+                         level the browser's save proves; replaces an outdated box
+  GET  /ready            spinner polling: pending | ready | full | error
+  GET  /app/<sid>        terminal page (iframe + notes panel + save sync)
+  ANY  /t/<sid>/*        reverse-proxy (HTTP + WebSocket) to that box's ttyd
+  GET  /save/<sid>       passwords of the levels reached, for the browser's save
+  GET  /leaderboard      finishers by summed solve time
+  GET  /login /auth/callback /logout   optional GitHub sign-in
+  GET  /healthz          {"players": N, "max": M}
 
-Each session gets a NIC-less container (profile `isolated`, no network device)
-and its own ttyd on a loopback port; the terminal rides `incus exec` over the
-control socket, so containers reach neither each other, the host, nor the net.
+Each box is a NIC-less container (profile `isolated`) plus its own ttyd on a
+loopback port; the terminal rides `incus exec` over the control socket, so
+containers reach neither each other, the host, nor the net. Every connection
+joins the box's one tmux session, so devices share a screen.
 
-Config via env (all optional):
-  LISTEN_HOST=127.0.0.1  LISTEN_PORT=8080
-  BASE_IMAGE=handover    PROFILE=isolated
-  MAX_PLAYERS=20         IDLE_MIN=60   MAX_LIFETIME_MIN=1440
-  OUTDATED_IDLE_MIN=5    (idle sessions on a replaced image are recycled)
-  TTYD_PORT_BASE=8100    LOGIN_USER=level0
+Config via env (all optional; secrets come from the EnvironmentFile):
+  LISTEN_HOST=127.0.0.1  LISTEN_PORT=8080   PUBLIC_URL=https://play.barrypekerman.com
+  BASE_IMAGE=handover    PROFILE=isolated   LOGIN_USER=level0
+  MAX_PLAYERS=20         IDLE_MIN=60        MAX_LIFETIME_MIN=1440
+  OUTDATED_IDLE_MIN=5    (idle boxes on a replaced image are recycled)
+  RATE_MAX=5 RATE_WINDOW=600   (new boxes per client IP per window, seconds)
+  TTYD_PORT_BASE=8100
+  STATE_FILE=~/.handover-sessions.json   LEADERBOARD_DB=~/handover-leaderboard.db
+  TURNSTILE_SITEKEY / TURNSTILE_ACTION=play / TURNSTILE_HOSTNAMES   bot check
+  GH_CLIENT_ID                           GitHub OAuth app (public)
+  secrets: TURNSTILE_SECRET, GH_CLIENT_SECRET, SESSION_SECRET (cookie signing)
 """
-import asyncio, os, re, secrets, time, logging, json, sqlite3, html, hmac, hashlib, base64
+import asyncio
+import base64
+import contextlib
+import hashlib
+import hmac
+import html
+import json
+import logging
+import os
+import re
+import secrets
+import sqlite3
+import time
 from aiohttp import web, ClientSession, WSMsgType, ClientTimeout, WSCloseCode
 
 LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
@@ -34,7 +58,8 @@ MAX_LIFE    = int(os.environ.get("MAX_LIFETIME_MIN", "1440")) * 60
 PORT_BASE   = int(os.environ.get("TTYD_PORT_BASE", "8100"))
 LOGIN_USER  = os.environ.get("LOGIN_USER", "level0")
 COOKIE      = "hid"
-MAX_RESUME  = 20          # highest level a save can resume at (21 = dave = the win)
+MAX_RESUME  = 20          # highest level a save can resume at
+WIN_INDEX   = 21          # dave's index in the login records: reaching it is the win
 PASS_RE     = re.compile(r"[A-Za-z0-9]{1,64}")
 STATE_FILE  = os.environ.get("STATE_FILE", os.path.expanduser("~/.handover-sessions.json"))
 DB_PATH     = os.environ.get("LEADERBOARD_DB", os.path.expanduser("~/handover-leaderboard.db"))
@@ -67,8 +92,9 @@ ip_hits: dict[str, list] = {}            # client IP -> recent provision timesta
 who: dict[str, dict] = {}                # sid -> {"uid": <github id>|None, "display": str}
                                          # (a signed-in player's box follows the account)
 live_ws: set = set()                     # open terminal WebSockets, closed on shutdown
-resume_req: dict[str, tuple] = {}        # sid -> (saved {level: pass}, server-known level[, note])
+resume_req: dict[str, tuple] = {}        # sid -> (saved {level: pass}, server-known level, note)
 live_image = ""                          # fingerprint BASE_IMAGE points at now
+background: set = set()                  # running provision tasks (asyncio keeps only weak refs)
 
 
 def db():
@@ -120,6 +146,12 @@ for idx in "${!first[@]}"; do echo "$idx ${first[$idx]}"; done
 '''
 
 
+async def ct_bash(ct: str, script: str) -> str:
+    """Run a bash script inside a container as root; returns its output."""
+    _, out = await run("incus", "exec", ct, "--", "bash", "-c", script)
+    return out
+
+
 async def read_passes(ct: str, levels) -> dict[int, str]:
     """{level: password} read from the container's /etc/handover_pass, in one
     exec. Never log the result."""
@@ -128,7 +160,7 @@ async def read_passes(ct: str, levels) -> dict[int, str]:
         return {}
     script = ("for n in %s; do printf '%%s ' $n; head -c 64 /etc/handover_pass/level$n "
               "2>/dev/null | tr -d '\\n'; echo; done" % " ".join(map(str, levels)))
-    rc, out = await run("incus", "exec", ct, "--", "bash", "-c", script)
+    out = await ct_bash(ct, script)
     got = {}
     for ln in out.splitlines():
         p = ln.split(" ", 1)
@@ -161,7 +193,43 @@ async def push_playtime(ct: str, secs: int):
     instead of just this box's own clock. Best-effort; tmpfs, world-readable."""
     cmd = ("mkdir -p /run/handover && echo %d > /run/handover/playtime "
            "&& chmod 644 /run/handover/playtime" % int(secs))
-    await run("incus", "exec", ct, "--", "bash", "-c", cmd)
+    await ct_bash(ct, cmd)
+
+
+async def read_reaches(ct: str) -> dict[int, int]:
+    """{level index: epoch of its first login} from the container's own records."""
+    reaches = {}
+    for ln in (await ct_bash(ct, PROGRESS_SH)).splitlines():
+        p = ln.split()
+        if len(p) == 2 and p[0].isdigit() and p[1].isdigit():
+            reaches[int(p[0])] = int(p[1])
+    return reaches
+
+
+def solve_time(reaches: dict[int, int], prev_max: int, new_max: int) -> int:
+    """Seconds spent on the levels completed since prev_max, each counted once."""
+    added = 0
+    for idx in range(prev_max, new_max):
+        if idx in reaches and idx + 1 in reaches:
+            added += max(0, reaches[idx + 1] - reaches[idx])
+    return added
+
+
+def save_progress(key: str, display: str, max_level: int, accum: int,
+                  finished: int, unranked: int):
+    try:
+        c = db()
+        c.execute("INSERT INTO players(key,display,max_level,accumulated,finished,updated,unranked) "
+                  "VALUES(?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
+                  "display=excluded.display, max_level=excluded.max_level, "
+                  "accumulated=excluded.accumulated, finished=excluded.finished, "
+                  "updated=excluded.updated, "
+                  "unranked=MAX(COALESCE(players.unranked,0), excluded.unranked)",
+                  (key, display, max_level, accum, finished, time.time(), unranked))
+        c.commit()
+        c.close()
+    except Exception:
+        log.exception("leaderboard write failed")
 
 
 async def update_progress(sid: str, ct: str):
@@ -173,43 +241,21 @@ async def update_progress(sid: str, ct: str):
     victory screen."""
     info = who.get(sid) or {"uid": None, "display": "anonymous"}
     key = info["uid"] or ("anon:" + sid)
-    display = info["display"]
-    rc, out = await run("incus", "exec", ct, "--", "bash", "-c", PROGRESS_SH)
-    reaches = {}
-    for ln in out.splitlines():
-        p = ln.split()
-        if len(p) == 2 and p[0].isdigit() and p[1].isdigit():
-            reaches[int(p[0])] = int(p[1])
+    reaches = await read_reaches(ct)
     s = sessions.get(sid)
     if s is not None:   # remember reached levels' passwords for the browser's save
         new = [n for n in reaches if n not in s["passes"]]
         s["passes"].update(await read_passes(ct, new))
     row = player_row(key)
     prev_max, accum, finished = row if row else (0, 0, 0)
-    # Resuming above what this key has played skips those levels' time.
-    unranked = 1 if s is not None and s.get("start", 0) > prev_max else 0
-    new_max = max(reaches) if reaches else prev_max
-    if reaches and new_max > prev_max:           # new levels completed this poll
-        added = 0
-        for idx in range(prev_max, new_max):     # count each newly-completed level once
-            if idx in reaches and (idx + 1) in reaches:
-                d = reaches[idx + 1] - reaches[idx]
-                if d >= 0:
-                    added += d
+    new_max = max(reaches, default=prev_max)
+    if new_max > prev_max:                       # new levels completed this poll
+        added = solve_time(reaches, prev_max, new_max)
         accum += added
-        finished = 1 if new_max >= 21 else finished
-        try:
-            c = db()
-            c.execute("INSERT INTO players(key,display,max_level,accumulated,finished,updated,unranked) "
-                      "VALUES(?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
-                      "display=excluded.display, max_level=excluded.max_level, "
-                      "accumulated=excluded.accumulated, finished=excluded.finished, "
-                      "updated=excluded.updated, "
-                      "unranked=MAX(COALESCE(players.unranked,0), excluded.unranked)",
-                      (key, display, new_max, accum, finished, time.time(), unranked))
-            c.commit(); c.close()
-        except Exception:
-            log.exception("leaderboard write failed")
+        finished = 1 if new_max >= WIN_INDEX else finished
+        # Resuming above what this key has played skips those levels' time.
+        unranked = 1 if s is not None and s.get("start", 0) > prev_max else 0
+        save_progress(key, info["display"], new_max, accum, finished, unranked)
         log.info("progress key=%s max=%d +%ds total=%ds fin=%d", key[:16], new_max, added, accum, finished)
     # The container is network-less and can't read the DB, so hand it the total.
     await push_playtime(ct, accum)
@@ -226,9 +272,9 @@ async def sweep_orphans():
     'pending'), so anything else is abandoned — a crash mid-provision, a stale
     launch, a desync — and would otherwise leak RAM + inotify forever."""
     live = {"p-" + s[:12] for s in sessions} | {"p-" + s[:12] for s in states}
-    rc, out = await run("incus", "list", "-c", "n", "-f", "csv")
-    for name in out.splitlines():
-        name = name.strip()
+    _, out = await run("incus", "list", "-c", "n", "-f", "csv")
+    for line in out.splitlines():
+        name = line.strip()
         if name.startswith("p-") and name not in live:
             log.warning("sweeping orphan container %s", name)
             await run("incus", "delete", "-f", name)
@@ -351,7 +397,7 @@ def save_state():
 
 
 async def image_fingerprint(ref: str) -> str:
-    rc, out = await run("incus", "image", "info", ref)
+    _, out = await run("incus", "image", "info", ref)
     m = re.search(r"^Fingerprint: *([0-9a-f]+)", out, re.M)
     return m.group(1) if m else ""
 
@@ -410,7 +456,7 @@ async def provision(sid: str) -> dict | None:
         await run("incus", "launch", BASE_IMAGE, ct, "--profile", PROFILE)
         ok = False
         for _ in range(40):
-            rc, out = await run("incus", "exec", ct, "--", "systemctl", "is-system-running")
+            _, out = await run("incus", "exec", ct, "--", "systemctl", "is-system-running")
             if out.strip() in ("running", "degraded"):
                 ok = True
                 break
@@ -446,11 +492,11 @@ async def choose_start(ct: str, req) -> tuple[int, list, str]:
     (start, saved levels that didn't match, message for the player)."""
     if not req:
         return 0, [], ""
-    saved, srv, override = (tuple(req) + ("",))[:3]
+    saved, srv, override = req
     real = await read_passes(ct, saved) if saved else {}
     good = [n for n, p in saved.items() if n in real and hmac.compare_digest(p, real[n])]
     drop = sorted(n for n in saved if n not in good)
-    start = max(good + [srv])
+    start = max([*good, srv])
     if start:
         note = f"resumed at level {start}"
     elif drop:
@@ -471,6 +517,14 @@ async def provision_bg(sid: str):
         states[sid] = "error"
 
 
+def start_provision(sid: str):
+    """Provision in the background, keeping a reference until it finishes."""
+    states[sid] = "pending"
+    task = asyncio.create_task(provision_bg(sid))
+    background.add(task)
+    task.add_done_callback(background.discard)
+
+
 async def teardown(sid: str, reason: str = ""):
     s = sessions.get(sid)
     if s:
@@ -482,10 +536,8 @@ async def teardown(sid: str, reason: str = ""):
     if not s:
         return
     log.info("teardown sid=%s ct=%s (%s)", sid[:12], s["ct"], reason)
-    try:
+    with contextlib.suppress(ProcessLookupError, AttributeError):
         s["proc"].terminate()
-    except (ProcessLookupError, AttributeError):
-        pass
     await run("incus", "delete", "-f", s["ct"])
     save_state()
 
@@ -771,8 +823,7 @@ async def h_play(request):
         remember(sid, uid, disp)
         resume_req[sid] = ({}, lvl, "the server was updated - " +
                            (f"resumed you at level {lvl}" if lvl else "you're on the new version"))
-        states[sid] = "pending"
-        asyncio.create_task(provision_bg(sid))
+        start_provision(sid)
         return spinner(sid)
     # returning visitor (this device or another one signed in to the same
     # account) whose box is alive or starting → straight in, no new spawn
@@ -793,9 +844,8 @@ async def h_play(request):
     sid = sid or secrets.token_hex(16)
     who[sid] = {"uid": uid, "display": disp}
     if form.get("mode") == "resume":
-        resume_req[sid] = (parse_save(form.get("save", "")), server_level(uid))
-    states[sid] = "pending"
-    asyncio.create_task(provision_bg(sid))
+        resume_req[sid] = (parse_save(form.get("save", "")), server_level(uid), "")
+    start_provision(sid)
     return spinner(sid)
 
 
@@ -1031,10 +1081,8 @@ async def on_shutdown(app):
     # them so the proxy handlers return at once. Containers keep running and the
     # browser's ttyd client auto-reconnects once we're back.
     for ws in list(live_ws):
-        try:
+        with contextlib.suppress(Exception):
             await ws.close(code=WSCloseCode.GOING_AWAY, message=b"server restarting")
-        except Exception:
-            pass
 
 
 async def on_cleanup(app):
