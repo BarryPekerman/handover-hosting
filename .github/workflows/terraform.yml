@@ -1,6 +1,6 @@
 name: terraform
 
-# Infra (infra/) runs in Terraform Cloud: org Berries-, project handover,
+# Infra (infra/) runs in Terraform Cloud: org berries-handover, project handover,
 # workspace handover-infra (remote execution, OCI creds as workspace variables).
 #   - PR touching infra/  -> speculative plan (never applies), summary on the run page
 #   - manual dispatch     -> plan, then apply only if the plan has changes.
@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  TF_CLOUD_ORGANIZATION: Berries-
+  TF_CLOUD_ORGANIZATION: berries-handover
   TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
   TF_WORKSPACE: handover-infra
   CONFIG_DIRECTORY: ./   # repo root: the workspace sets working directory infra/
