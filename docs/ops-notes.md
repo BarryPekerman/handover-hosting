@@ -144,9 +144,13 @@ fail2ban on sshd. Host SSH is key-only.
     `deploy-image`; spawner deploy manual-only; Terraform on TFC with a scoped
     OCI user `tf-handover`; instance moved into compartment `handover`, state
     migrated, remote plan is a no-op.
-  - Spawner: graceful moves onto a new image. (Not yet deployed: a signed-in
-    player's box follows their GitHub account across devices; cleanup sweep.)
+  - Spawner: graceful moves onto a new image; a signed-in player's box
+    follows their GitHub account across devices.
   - MOTD no longer shows a pager hint.
+  - Host config is `host/site.yml` (applied by deploy.yml); tmux shared screen.
+  - Static-analysis pass (ruff, pylint, vulture, radon, actionlint, zizmor,
+    checkov, jscpd): spawner refactor, actions pinned to SHAs, read-only
+    workflow tokens. PR #1 (IMDS v2 only) awaits merge + terraform apply.
   - Resume from the browser save (see gotchas). Resumed runs set `unranked` in
     the leaderboard DB (column added on startup).
   - Progress check only counts su records with `_EXE=/usr/bin/su`. Before, any
