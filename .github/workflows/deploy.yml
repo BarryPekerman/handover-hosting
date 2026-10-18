@@ -37,6 +37,8 @@ jobs:
         run: python3 -m pip install --user "ansible-core==2.21.5"
 
       - name: Host config
+        env:
+          CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
         run: |
           ansible-playbook -i handover, --diff host/site.yml
 

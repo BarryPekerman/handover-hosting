@@ -12,6 +12,10 @@
   become: true
   vars:
     cloudflared_version: "2026.10.1"
+    # Run token for the Terraform-made tunnel (infra/tunnel.tf). deploy.yml
+    # passes it from the CF_TUNNEL_TOKEN secret; when absent (e.g. a dry run
+    # from a laptop) the connector tasks are skipped.
+    tunnel_token: "{{ lookup('ansible.builtin.env', 'CF_TUNNEL_TOKEN') }}"
     pool_size: 30GiB
     isolated_profile:
       config:
@@ -44,6 +48,12 @@
 
     - name: Reload systemd
       ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart tunnel connector
+      ansible.builtin.systemd:
+        name: cloudflared-tf
+        state: restarted
         daemon_reload: true
 
   tasks:
@@ -159,6 +169,55 @@
         (profile.stdout | from_yaml).config != isolated_profile.config or
         (profile.stdout | from_yaml).devices != isolated_profile.devices
       changed_when: true
+
+    # Connector for the Terraform-made tunnel: its routes live in Cloudflare
+    # (infra/tunnel.tf), so the host holds only the run token. No privileges.
+    - name: Tunnel connector directory
+      ansible.builtin.file:
+        path: /etc/cloudflared
+        state: directory
+        mode: "0755"
+      when: tunnel_token | length > 0
+
+    - name: Tunnel connector token
+      ansible.builtin.copy:
+        dest: /etc/cloudflared/handover-tf.env
+        content: "TUNNEL_TOKEN={{ tunnel_token }}\n"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      when: tunnel_token | length > 0
+      notify: Restart tunnel connector
+
+    - name: Tunnel connector unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/cloudflared-tf.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Cloudflare tunnel handover-tf (routes managed in Terraform)
+          After=network-online.target
+          Wants=network-online.target
+          ConditionPathExists=/etc/cloudflared/handover-tf.env
+          [Service]
+          EnvironmentFile=/etc/cloudflared/handover-tf.env
+          ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run
+          DynamicUser=yes
+          Restart=on-failure
+          RestartSec=5
+          [Install]
+          WantedBy=multi-user.target
+      when: tunnel_token | length > 0
+      notify: Restart tunnel connector
+
+    - name: Tunnel connector running
+      ansible.builtin.systemd:
+        name: cloudflared-tf
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: tunnel_token | length > 0
 
     - name: Cloudflared tunnel config
       ansible.builtin.copy:
