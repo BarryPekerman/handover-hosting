@@ -37,8 +37,9 @@ loopback port; the spawner reverse-proxies HTTP **and the terminal WebSocket**
 under `/t/<sid>/`.
 
 - **Whose box:** the `hid` cookie, or for a signed-in player their GitHub
-  account, so every device signed in to that account gets the same box (each
-  connection its own shell).
+  account, so every device signed in to that account gets the same box. Every
+  connection joins the box's one tmux session, so the devices share one screen
+  (images without tmux fall back to a plain shell per connection).
 - **Saves and resume:** the spawner reads each reached level's password from the
   container; the page keeps them in localStorage. "Resume at level N" starts a
   new box at the highest saved level whose password matches. Resumed runs are

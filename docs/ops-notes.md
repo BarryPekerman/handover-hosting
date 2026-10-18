@@ -108,8 +108,9 @@ applies it on every deploy. Dry run from a laptop:
   server").
 - **Whose box:** `/app/<sid>` and `/t/<sid>/` require the httponly `hid` cookie
   to match the URL sid, or a sign-in as the GitHub account that owns the box.
-  Signed-in players get the same box on every device; anonymous ones lose it
-  with their cookies (a new box, then resume).
+  Signed-in players get the same box on every device, and every connection
+  attaches to the box's one tmux session (`play`), so devices share a screen;
+  anonymous ones lose the box with their cookies (a new box, then resume).
 
 ## Hardening posture (break-tested)
 
