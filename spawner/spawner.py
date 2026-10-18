@@ -17,6 +17,7 @@ Config via env (all optional):
   LISTEN_HOST=127.0.0.1  LISTEN_PORT=8080
   BASE_IMAGE=handover    PROFILE=isolated
   MAX_PLAYERS=20         IDLE_MIN=60   MAX_LIFETIME_MIN=1440
+  OUTDATED_IDLE_MIN=5    (idle sessions on a replaced image are recycled)
   TTYD_PORT_BASE=8100    LOGIN_USER=level0
 """
 import asyncio, os, re, secrets, time, logging, json, sqlite3, html, hmac, hashlib, base64
@@ -28,6 +29,7 @@ BASE_IMAGE  = os.environ.get("BASE_IMAGE", "handover")
 PROFILE     = os.environ.get("PROFILE", "isolated")
 MAX_PLAYERS = int(os.environ.get("MAX_PLAYERS", "20"))
 IDLE_SEC    = int(os.environ.get("IDLE_MIN", "60")) * 60
+OUTDATED_IDLE = int(os.environ.get("OUTDATED_IDLE_MIN", "5")) * 60
 MAX_LIFE    = int(os.environ.get("MAX_LIFETIME_MIN", "1440")) * 60
 PORT_BASE   = int(os.environ.get("TTYD_PORT_BASE", "8100"))
 LOGIN_USER  = os.environ.get("LOGIN_USER", "level0")
@@ -64,7 +66,8 @@ states: dict[str, str] = {}              # sid -> "pending"|"full"|"error" (read
 ip_hits: dict[str, list] = {}            # client IP -> recent provision timestamps (throttle)
 who: dict[str, dict] = {}                # sid -> {"uid": <github id>|None, "display": str}
 live_ws: set = set()                     # open terminal WebSockets, closed on shutdown
-resume_req: dict[str, tuple] = {}        # sid -> (saved {level: pass}, server-known level)
+resume_req: dict[str, tuple] = {}        # sid -> (saved {level: pass}, server-known level[, note])
+live_image = ""                          # fingerprint BASE_IMAGE points at now
 
 
 def db():
@@ -299,7 +302,7 @@ def alloc_port() -> int:
 def save_state():
     """Persist sessions (minus the live proc handle) so a restart can re-adopt them."""
     try:
-        data = {sid: {k: s[k] for k in ("ct", "port", "created", "last", "start")}
+        data = {sid: {k: s[k] for k in ("ct", "port", "created", "last", "start", "image")}
                 for sid, s in sessions.items()}
         tmp = STATE_FILE + ".tmp"
         with open(tmp, "w") as f:
@@ -307,6 +310,27 @@ def save_state():
         os.replace(tmp, STATE_FILE)
     except Exception:
         log.exception("save_state failed")
+
+
+async def image_fingerprint(ref: str) -> str:
+    rc, out = await run("incus", "image", "info", ref)
+    m = re.search(r"^Fingerprint: *([0-9a-f]+)", out, re.M)
+    return m.group(1) if m else ""
+
+
+async def container_image(ct: str) -> str:
+    rc, out = await run("incus", "config", "get", ct, "volatile.base_image")
+    return out.strip() if rc == 0 else ""
+
+
+def outdated(s: dict) -> bool:
+    """True once the image this session's container came from is no longer the
+    live one (an image deploy moved the alias)."""
+    return bool(live_image and s.get("image") and s["image"] != live_image)
+
+
+def reached_level(s: dict) -> int:
+    return max([s.get("start", 0)] + [n for n in s["passes"] if n <= MAX_RESUME])
 
 
 def login_user(start: int) -> str:
@@ -358,7 +382,8 @@ async def provision(sid: str) -> dict | None:
         proc = await start_ttyd(sid, ct, port, login_user(start))
         now = time.time()
         sessions[sid] = {"ct": ct, "port": port, "proc": proc, "created": now, "last": now,
-                         "start": start, "passes": {}, "drop": drop, "note": note}
+                         "start": start, "passes": {}, "drop": drop, "note": note,
+                         "image": await container_image(ct)}
         save_state()
         log.info("provisioned sid=%s ct=%s port=%d start=level%d dropped=%d (%d/%d)",
                  sid[:12], ct, port, start, len(drop), len(sessions), MAX_PLAYERS)
@@ -374,7 +399,7 @@ async def choose_start(ct: str, req) -> tuple[int, list, str]:
     (start, saved levels that didn't match, message for the player)."""
     if not req:
         return 0, [], ""
-    saved, srv = req
+    saved, srv, override = (tuple(req) + ("",))[:3]
     real = await read_passes(ct, saved) if saved else {}
     good = [n for n, p in saved.items() if n in real and hmac.compare_digest(p, real[n])]
     drop = sorted(n for n in saved if n not in good)
@@ -386,7 +411,7 @@ async def choose_start(ct: str, req) -> tuple[int, list, str]:
                 "rebuilt) - starting from level 0")
     else:
         note = ""
-    return start, drop, note
+    return start, drop, override or note
 
 
 async def provision_bg(sid: str):
@@ -419,9 +444,11 @@ async def teardown(sid: str, reason: str = ""):
 
 
 async def reaper(app):
+    global live_image
     try:
         while True:
             await asyncio.sleep(30)
+            live_image = await image_fingerprint(BASE_IMAGE) or live_image
             await record_finishers()      # capture victories before reaping
             await sweep_orphans()         # GC containers nobody is tracking
             now = time.time()
@@ -430,6 +457,10 @@ async def reaper(app):
                     await teardown(sid, "idle")
                 elif now - s["created"] > MAX_LIFE:
                     await teardown(sid, "max-lifetime")
+                # After an image deploy, idle players move over now; their open
+                # tab sends them to the landing page, where they can resume.
+                elif outdated(s) and now - s["last"] > OUTDATED_IDLE:
+                    await teardown(sid, "outdated-idle")
     except asyncio.CancelledError:
         pass
 
@@ -597,7 +628,9 @@ function toast(t){var d=document.createElement('div');d.id='toast';d.textContent
   document.body.appendChild(d);setTimeout(function(){d.style.opacity=0;},5000);
   setTimeout(function(){d.remove();},6000);}
 function sync(){
-  fetch('/save/__SID__',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;})
+  fetch('/save/__SID__',{cache:'no-store'}).then(function(r){
+    if(r.status===404){location.replace('/');return null;}   // session recycled
+    return r.ok?r.json():null;})
   .then(function(j){
     if(!j)return;
     var lv=loadSave();
@@ -637,6 +670,11 @@ async def h_landing(request):
                   ' &mdash; save progress &amp; join the leaderboard across sessions')
     else:
         signin = ""
+    sid = request.cookies.get(COOKIE)
+    if sid in sessions and outdated(sessions[sid]):
+        lvl = reached_level(sessions[sid])
+        signin = (f'<b>Dave\'s box got an update.</b> Press play to continue on the new version'
+                  + (f" at level {lvl}" if lvl else "") + ".<br>" + signin)
     page = (LANDING.replace("__TS_SCRIPT__", script)
                    .replace("__TS_WIDGET__", widget)
                    .replace("__SIGNIN__", signin)
@@ -679,6 +717,18 @@ async def h_play(request):
     """POST only: find-or-create this visitor's container. A GET can never spawn
     (so crawlers / prefetch / a one-line loop can't fill every seat)."""
     sid = request.cookies.get(COOKIE)
+    # returning visitor on a replaced image → new container at the level they
+    # reached (known server-side). It replaces a seat, so no bot check/throttle.
+    if sid and sid in sessions and outdated(sessions[sid]):
+        lvl = reached_level(sessions[sid])
+        await teardown(sid, "upgrade")
+        uid, disp = identity(request)
+        who[sid] = {"uid": uid, "display": disp}
+        resume_req[sid] = ({}, lvl, "the server was updated - " +
+                           (f"resumed you at level {lvl}" if lvl else "you're on the new version"))
+        states[sid] = "pending"
+        asyncio.create_task(provision_bg(sid))
+        return web.Response(text=SPAWNING.replace("__SID__", sid), content_type="text/html")
     # returning visitor whose container is still alive → straight in, no new spawn
     if sid and sid in sessions:
         uid, disp = identity(request)
@@ -712,7 +762,7 @@ async def h_play_get(request):
     """A GET must never create a container. Live sessions go to their terminal;
     everyone else goes back to the landing page to press Play (which POSTs)."""
     sid = request.cookies.get(COOKIE)
-    if sid and sid in sessions:
+    if sid and sid in sessions and not outdated(sessions[sid]):
         return web.HTTPFound(f"/app/{sid}")
     return web.HTTPFound("/")
 
@@ -736,6 +786,8 @@ async def h_app(request):
     if sid not in sessions:          # expired/reset → landing page (Play re-spawns via POST)
         return web.HTTPFound("/")
     if not owns(request, sid):       # not your session → back to the start
+        return web.HTTPFound("/")
+    if outdated(sessions[sid]):      # reload after an image deploy → offer the upgrade
         return web.HTTPFound("/")
     return web.Response(text=APP.replace("__SAVE_JS__", SAVE_JS).replace("__SID__", sid),
                         content_type="text/html")
@@ -906,6 +958,8 @@ async def on_start(app):
             data = json.load(f)
     except Exception:
         data = {}
+    global live_image
+    live_image = await image_fingerprint(BASE_IMAGE)
     for sid, s in data.items():
         rc, _ = await run("incus", "exec", s["ct"], "--", "true")
         if rc != 0:
@@ -914,7 +968,8 @@ async def on_start(app):
         proc = await start_ttyd(sid, s["ct"], s["port"], login_user(start))
         sessions[sid] = {"ct": s["ct"], "port": s["port"], "proc": proc,
                          "created": s.get("created", time.time()), "last": time.time(),
-                         "start": start, "passes": {}, "drop": [], "note": ""}
+                         "start": start, "passes": {}, "drop": [], "note": "",
+                         "image": s.get("image") or await container_image(s["ct"])}
     if sessions:
         log.info("re-adopted %d live session(s) after restart", len(sessions))
     save_state()
