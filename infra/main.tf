@@ -9,6 +9,10 @@ terraform {
       source  = "cloudflare/cloudflare"
       version = "5.28.0"
     }
+    github = {
+      source  = "integrations/github"
+      version = "6.13.0"
+    }
   }
   # State and runs live in Terraform Cloud (org berries-handover, project
   # handover) — its own org, so this repo's token reaches nothing else.
@@ -28,6 +32,11 @@ terraform {
 # tenancy's one subnet) and nothing else.
 # Reads CLOUDFLARE_API_TOKEN from the workspace environment.
 provider "cloudflare" {}
+
+# Reads GITHUB_TOKEN from the workspace environment (see github.tf).
+provider "github" {
+  owner = "BarryPekerman"
+}
 
 provider "oci" {
   tenancy_ocid = var.tenancy_ocid
