@@ -29,6 +29,20 @@ resource "github_actions_secret" "cf_access_client_secret" {
   value       = cloudflare_zero_trust_access_service_token.ci.client_secret
 }
 
+# Bot check on Play: both halves from the widget in cloudflare.tf. deploy.yml
+# writes them into the spawner's env file.
+resource "github_actions_secret" "turnstile_sitekey" {
+  repository  = "handover-hosting"
+  secret_name = "TURNSTILE_SITEKEY"
+  value       = cloudflare_turnstile_widget.play.sitekey
+}
+
+resource "github_actions_secret" "turnstile_secret" {
+  repository  = "handover-hosting"
+  secret_name = "TURNSTILE_SECRET"
+  value       = cloudflare_turnstile_widget.play.secret
+}
+
 # Run token for the host's tunnel connector (deploy.yml -> host/site.yml).
 resource "github_actions_secret" "cf_tunnel_token" {
   repository  = "handover-hosting"

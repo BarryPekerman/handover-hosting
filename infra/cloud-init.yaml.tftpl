@@ -6,7 +6,8 @@
 # host/site.yml, applied by deploy.yml.
 #
 # The connector unit and env file below must match host/site.yml ("Tunnel
-# connector" tasks), which takes them over on the first deploy.
+# connector" tasks), which takes them over on the first deploy. The instance's
+# authorized keys (admin + both repos' deploy keys) come from its metadata.
 #
 # After `terraform apply` creates a box:
 #   1. gh workflow run deploy.yml -R BarryPekerman/handover-hosting
@@ -14,6 +15,15 @@
 #   2. gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<latest passing ci on main>
 package_update: true
 package_upgrade: true
+
+# The SSH host key comes from Terraform (infra/hostkey.tf), so it is the same
+# on every rebuild and CI's pinned known_hosts keeps matching.
+ssh_deletekeys: true
+ssh_genkeytypes: []
+ssh_keys:
+  ed25519_private: |
+    ${indent(4, host_key_private)}
+  ed25519_public: ${host_key_public}
 
 write_files:
   - path: /etc/cloudflared/handover-tf.env
