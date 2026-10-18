@@ -90,6 +90,23 @@ Host setup changes go in `host/site.yml` (Ansible), never by hand: `deploy.yml`
 applies it on every deploy. Dry run from a laptop:
 `ansible-playbook -i 84.13.72.156, -u ubuntu --private-key ~/.ssh/handover host/site.yml --check --diff`.
 
+## Backups
+
+`backup.yml` runs nightly (02:17 UTC): the leaderboard DB and `~/.cloudflared`,
+encrypted with `BACKUP_PASSPHRASE` (a copy is in `~/handover-backup-passphrase.txt`
+on the admin laptop), kept 30 days as the `handover-backup` artifact. Restore:
+
+```bash
+gh run download <run> -R BarryPekerman/handover-hosting -n handover-backup
+gpg --pinentry-mode loopback --passphrase-file ~/handover-backup-passphrase.txt \
+  -d handover-backup-*.tgz.gpg | tar xzf - -C restore/
+scp restore/handover-leaderboard.db ubuntu@$H:~/          # spawner stopped
+scp -r restore/cloudflared/. ubuntu@$H:~/.cloudflared/
+```
+
+The live level passwords are not in it (they're the `HANDOVER_CREDENTIALS`
+secret; readable copy: `~/handover-live-credentials.tgz` on the admin laptop).
+
 ## Known gotchas / non-bugs (seen this session)
 
 - **"I dropped into level10":** was a misread of `level0@<hostname>`. Prompt now
