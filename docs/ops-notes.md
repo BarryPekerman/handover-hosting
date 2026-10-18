@@ -90,6 +90,15 @@ Host setup changes go in `host/site.yml` (Ansible), never by hand: `deploy.yml`
 applies it on every deploy. Dry run from a laptop:
 `ansible-playbook -i 84.13.72.156, -u ubuntu --private-key ~/.ssh/alex_handover host/site.yml --check --diff`.
 
+## Reboots
+
+Kernel updates install unattended; `handover-maybe-reboot.timer` (04:00 Israel
+time) reboots only when `/run/reboot-required` exists and `/healthz` says 0
+players, otherwise it waits for the next night. Decision without rebooting:
+`sudo env DRY_RUN=1 /usr/local/sbin/handover-maybe-reboot`; history:
+`journalctl -t handover-reboot`. After a reboot, player containers are gone
+(they don't autostart); the spawner drops their sessions and players resume.
+
 ## Backups
 
 `backup.yml` runs nightly (02:17 UTC): the leaderboard DB and `~/.cloudflared`,
