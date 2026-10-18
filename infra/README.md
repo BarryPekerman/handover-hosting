@@ -32,39 +32,35 @@ Runs go through GitHub (`.github/workflows/terraform.yml`):
 `terraform plan` from a laptop also works (`terraform login` first); it runs
 remotely in the same workspace.
 
-## Two paths
+## Rebuild from scratch
 
-**Adopt the running box (non-destructive, recommended).** The live instance
-already exists, so import it instead of creating a second one (free A1 has no
-room for two):
+What a newcomer (or a rebuild) needs. **Prerequisites are made by hand, once;
+everything after them is code.**
 
-```sh
-terraform import oci_core_instance.handover \
-  ocid1.instance.oc1.il-jerusalem-1.anwxiljrpmn4b2ycg5eobj62v2cfrwi4nzfwvavhvh6opstdam4sfvbqmywa
-terraform plan   # should be ~no-op; `prevent_destroy` guards the box
-```
+### Prerequisites
 
-After import, Terraform manages the box in place. `prevent_destroy` +
-`ignore_changes` mean a newer base image or an edited cloud-init will **not**
-replace a running instance — rebuilds are deliberate.
+| Provider | By hand | Notes |
+|---|---|---|
+| Cloudflare | Account, zone `barrypekerman.com`, Zero Trust enabled (team name + a payment method, even on Free), API token `terraform-handover` | Token: Account → Cloudflare Tunnel, Access: Apps and Policies, Access: Service Tokens, Turnstile (all Edit); Zone → DNS Edit, Zone Read; only this zone; ~1 year TTL |
+| OCI | Tenancy; compartment `handover`; user `tf-handover` (API key only) in group `handover-terraform`; policy `handover-terraform` | Policy: manage instance-family, volume-family, security-lists in compartment handover; use vnics, use subnets in tenancy. The VCN/subnet (`Basic-VCN`) are referenced, not managed |
+| Terraform Cloud | Org `berries-handover`, project + workspace `handover-infra` (remote execution, working directory `infra`, auto-apply off) | Workspace vars: `tenancy_ocid`, `user_ocid`, `fingerprint`, `private_key` (sensitive), `compartment_ocid`, `availability_domain`, `subnet_ocid`, `ssh_public_key`; env `CLOUDFLARE_API_TOKEN` (sensitive); owners team token → `TF_API_TOKEN` in this repo |
+| GitHub | Both repos and their secrets | handover-hosting: `TF_API_TOKEN`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`, `CF_ACCESS_CLIENT_ID/SECRET`, `CF_TUNNEL_TOKEN`, `TURNSTILE_SECRET`, `GH_CLIENT_SECRET`, `SESSION_SECRET`, `BACKUP_PASSPHRASE`. bandit-wannabe: `HANDOVER_CREDENTIALS`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`, `CF_ACCESS_CLIENT_ID/SECRET` |
 
-**Rebuild from scratch (deliberate, capacity-sensitive).** On the free tier the
-4/24 allocation is fully used by the running box, so a true rebuild is
-terminate-then-apply, which risks not getting the capacity back. Only do this
-knowingly:
+### Order
 
-```sh
-# (optional) terraform state rm, terminate the old box, then:
-terraform apply    # creates the instance; cloud-init provisions it
-```
+1. `gh workflow run terraform.yml` (or merge a PR touching `infra/`): the
+   instance (cloud-init starts the tunnel connector from its token), the
+   tunnel and its routes, DNS, Access, Turnstile, the security list.
+2. `gh workflow run deploy.yml` — host config (`host/site.yml`) + spawner. CI
+   reaches the box through `handover-ssh` with the service token; port 22
+   stays closed. On a new box `DEPLOY_KNOWN_HOSTS` must be updated to its
+   host key first (`ssh handover` from a laptop shows it).
+3. `gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<latest passing ci on main>`.
+4. Restore the leaderboard from the newest `backup.yml` artifact (docs/ops-notes.md).
 
-Then configure the host and deliver the app, secrets and game image (in this
-order: the image needs Incus):
-
-```sh
-gh workflow run deploy.yml -R BarryPekerman/handover-hosting
-gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<latest passing ci run on main>
-```
+`prevent_destroy` guards the instance, the tunnel, the `play` record and the
+security list. On free-tier A1 a true rebuild means terminating the old box
+first, which risks not getting the capacity back; do it knowingly.
 
 ## What's still manual / TODO
 
