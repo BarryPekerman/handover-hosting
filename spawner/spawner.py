@@ -371,6 +371,14 @@ def reached_level(s: dict) -> int:
     return max([s.get("start", 0)] + [n for n in s["passes"] if n <= MAX_RESUME])
 
 
+# Each connection joins one tmux session per box, so every device signed in to
+# the same account sees (and types into) the same screen. The outer login shell
+# skips the banner (MOTD_SHOWN); the shell inside tmux prints it, once. Images
+# without tmux get a plain login shell.
+SHELL_CMD = ("if command -v tmux >/dev/null; then exec env -u MOTD_SHOWN tmux new-session -A -s play; "
+             "else exec env -u MOTD_SHOWN bash -l; fi")
+
+
 def login_user(start: int) -> str:
     return f"level{start}" if start else LOGIN_USER
 
@@ -383,7 +391,8 @@ async def start_ttyd(sid: str, ct: str, port: int, user: str):
         # screens (xterm's fit addon derives columns from pixel width / char
         # width) while staying readable on a desktop.
         "-t", "fontSize=13",
-        "-W", "incus", "exec", ct, "--", "su", "-", user,
+        "-W", "incus", "exec", ct, "--env", "MOTD_SHOWN=yes", "--",
+        "su", "-", user, "-w", "MOTD_SHOWN", "-c", SHELL_CMD,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
 
