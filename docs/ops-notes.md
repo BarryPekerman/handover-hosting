@@ -56,7 +56,9 @@ top. Not player-facing.
   node-exporter (`127.0.0.1:9100`) through tunnel routes `handover-metrics` /
   `handover-node`. An Access app lets only the `oke-prometheus` service token
   through (`infra/metrics.tf`). Alerts go to Telegram; the "The Handover"
-  Grafana dashboard is in `oke-gitops`. Counters restart with the spawner; a
+  Grafana dashboard is in `oke-gitops`, served at
+  https://ctf-monitor.barrypekerman.com (tunnel `oke-grafana` from a cloudflared
+  in the cluster, `infra/grafana.tf`; Access: your email). Counters restart with the spawner; a
   box's counted levels are kept in the state file, so a restart doesn't count
   them twice.
 - **Secrets:** `/home/ubuntu/handover-spawner.env` (git-ignored, host-only):
@@ -202,6 +204,10 @@ which it ignores.)
 
 ## Change log
 
+- **2026-10-19:** events table (`events` in the leaderboard DB: start, resume,
+  reach, finish, end, cmd; no player identity) and command names from the
+  image's bash hook; level times over 4 h stay out of the histogram; Grafana
+  tunnel `oke-grafana` at ctf-monitor.
 - **2026-10-19:** metrics for the OKE Prometheus (spawner `/metrics`,
   node-exporter, tunnel routes + Access app `handover-metrics`). Rotating the
   `oke-prometheus` token means re-encrypting `prometheus-cf-access` in

@@ -44,6 +44,7 @@ import logging
 import os
 import re
 import secrets
+import shlex
 import sqlite3
 import time
 from aiohttp import web, ClientSession, WSMsgType, ClientTimeout, WSCloseCode
@@ -102,6 +103,17 @@ background: set = set()                  # running provision tasks (asyncio keep
 # service token). Counters reset when the spawner restarts; Prometheus handles that.
 METRICS_PORT = int(os.environ.get("METRICS_PORT", "9101"))
 SOLVE_BUCKETS = (60, 180, 300, 600, 1200, 1800, 3600, 7200, 14400)  # seconds
+SOLVE_CAP = 14400        # longer is a player who walked away: kept in events, not in the histogram
+# Commands counted by name in the metrics; anything else is "other" (the
+# events table keeps every name). Bounded so a player can't explode the series.
+TRACKED_CMDS = frozenset("""
+    ls cd cat less more head tail grep find file strings xxd od hexdump base64
+    openssl gpg tar gzip zcat unzip bzip2 xz diff sort uniq wc cut tr awk sed
+    vim vi nano man mail su ssh go sudo id whoami groups getfacl setfacl chmod
+    stat ps top kill pkill pgrep systemctl journalctl crontab at env export
+    echo printf history clear exit git python3 curl wget nc ss lsof sqlite3 jq
+    tmux tree pwd cp mv rm mkdir touch ln readlink which type alias help
+""".split())
 counters: dict[tuple, float] = {}        # (name, sorted label items) -> value
 solve_hist: dict[int, list] = {}         # level -> per-bucket counts + [+Inf count, sum]
 
@@ -122,18 +134,34 @@ def observe_solve(level: int, secs: float):
 
 def count_progress(s: dict, reaches: dict[int, int]):
     """Count each level a box reaches once (the funnel), and the time spent on
-    the level before it, when that level was played in this box."""
+    the level before it, when that level was played in this box. Every reach
+    is also an event row with its real time."""
     counted = s.setdefault("counted", [])
+    rows = []
     for idx in sorted(reaches):
         if idx in counted:
             continue
         counted.append(idx)
+        rows.append((reaches[idx], s.get("ct", ""), "reach", idx, ""))
         inc("handover_level_reached_total", level=idx)
         if idx - 1 in reaches and idx - 1 >= s.get("start", 0):
-            observe_solve(idx - 1, max(0, reaches[idx] - reaches[idx - 1]))
+            secs = max(0, reaches[idx] - reaches[idx - 1])
+            if secs <= SOLVE_CAP:
+                observe_solve(idx - 1, secs)
+            else:
+                inc("handover_level_solve_capped_total", level=idx - 1)
         if idx == WIN_INDEX:
             ranked = s.get("start", 0) == 0 and all(i in reaches for i in range(WIN_INDEX + 1))
             inc("handover_finishes_total", ranked=str(ranked).lower())
+            rows.append((reaches[idx], s.get("ct", ""), "finish", idx, "ranked" if ranked else "unranked"))
+    events(rows)
+
+
+def count_commands(s: dict, found: list[tuple[int, int, str]]):
+    """found: (epoch, level, command name) read from the box's journal."""
+    for _, lvl, cmd in found:
+        inc("handover_commands_total", level=lvl, cmd=cmd if cmd in TRACKED_CMDS else "other")
+    events([(t, s.get("ct", ""), "cmd", lvl, cmd) for t, lvl, cmd in found])
 
 
 def _labels(items) -> str:
@@ -183,7 +211,24 @@ def db():
     # is missing time and it stays off the leaderboard.
     if "unranked" not in {r[1] for r in c.execute("PRAGMA table_info(players)")}:
         c.execute("ALTER TABLE players ADD COLUMN unranked INTEGER DEFAULT 0")
+    # Raw game events for analytics (later: Postgres). box = container name;
+    # no player identity. kind: start, resume, reach, finish, end, cmd.
+    c.execute("CREATE TABLE IF NOT EXISTS events "
+              "(ts INTEGER, box TEXT, kind TEXT, level INTEGER, detail TEXT)")
     return c
+
+
+def events(rows: list[tuple]):
+    """Append (ts, box, kind, level, detail) rows; analytics never break play."""
+    if not rows:
+        return
+    try:
+        c = db()
+        c.executemany("INSERT INTO events(ts,box,kind,level,detail) VALUES(?,?,?,?,?)", rows)
+        c.commit()
+        c.close()
+    except Exception:
+        log.exception("events write failed")
 
 
 def player_row(key):
@@ -218,6 +263,44 @@ while read -r u when; do
 done < <(collect)
 for idx in "${!first[@]}"; do echo "$idx ${first[$idx]}"; done
 '''
+
+
+# Runs INSIDE a player container. The image's bash logs each command's name
+# (never its arguments, only names bash knows as a command) to the journal as
+# handover-cmd; journald stamps the sender's uid, which maps to the level.
+CMDS_SH = r'''
+getent passwd | awk -F: '$1 ~ /^(level[0-9]+|dave)$/ {print "U", $3, $1}'
+journalctl -q -o json SYSLOG_IDENTIFIER=handover-cmd ${CURSOR:+"--after-cursor=$CURSOR"} -n 2000
+'''
+CMD_NAME = re.compile(r"^[A-Za-z0-9_.+-]{1,32}$")
+
+
+def parse_commands(out: str) -> tuple[list[tuple[int, int, str]], str]:
+    """(epoch, level, name) per logged command, and the journal cursor to resume from."""
+    uids, found, cursor = {}, [], ""
+    for ln in out.splitlines():
+        if ln.startswith("U "):
+            p = ln.split()
+            if len(p) == 3:
+                uids[p[1]] = WIN_INDEX if p[2] == "dave" else int(p[2][5:])
+            continue
+        try:
+            e = json.loads(ln)
+        except ValueError:
+            continue
+        cursor = e.get("__CURSOR", cursor)
+        name, uid = e.get("MESSAGE"), e.get("_UID")
+        if isinstance(name, str) and CMD_NAME.match(name) and uid in uids:
+            found.append((int(e.get("__REALTIME_TIMESTAMP", "0")) // 1_000_000, uids[uid], name))
+    return found, cursor
+
+
+async def read_commands(s: dict):
+    script = f"CURSOR={shlex.quote(s.get('cmd_cursor', ''))}\n" + CMDS_SH
+    found, cursor = parse_commands(await ct_bash(s["ct"], script))
+    if cursor:
+        s["cmd_cursor"] = cursor
+    count_commands(s, found)
 
 
 async def ct_bash(ct: str, script: str) -> str:
@@ -326,6 +409,7 @@ async def update_progress(sid: str, ct: str):
     s = sessions.get(sid)
     if s is not None:
         count_progress(s, reaches)
+        await read_commands(s)
     if s is not None:   # remember reached levels' passwords for the browser's save
         new = [n for n in reaches if n not in s["passes"]]
         s["passes"].update(await read_passes(ct, new))
@@ -471,7 +555,7 @@ def save_state():
     """Persist sessions (minus the live proc handle) so a restart can re-adopt them."""
     try:
         data = {sid: {**{k: s[k] for k in ("ct", "port", "created", "last", "start", "image")},
-                      "counted": s.get("counted", []),
+                      "counted": s.get("counted", []), "cmd_cursor": s.get("cmd_cursor", ""),
                       "who": who.get(sid, {"uid": None, "display": "anonymous"})}
                 for sid, s in sessions.items()}
         tmp = STATE_FILE + ".tmp"
@@ -583,7 +667,9 @@ async def choose_start(ct: str, req) -> tuple[int, list, str]:
     good = [n for n, p in saved.items() if n in real and hmac.compare_digest(p, real[n])]
     drop = sorted(n for n in saved if n not in good)
     start = max([*good, srv])
-    inc("handover_resumes_total", outcome="resumed" if start else ("no_match" if drop else "nothing_saved"))
+    outcome = "resumed" if start else ("no_match" if drop else "nothing_saved")
+    inc("handover_resumes_total", outcome=outcome)
+    events([(int(time.time()), ct, "resume", start, outcome)])
     if start:
         note = f"resumed at level {start}"
     elif drop:
@@ -599,6 +685,8 @@ async def provision_bg(sid: str):
     try:
         s = await provision(sid)
         states[sid] = "ready" if s else "full"
+        if s:
+            events([(int(time.time()), s["ct"], "start", s.get("start", 0), s.get("image", "")[:12])])
     except Exception:
         log.exception("provision failed sid=%s", sid)
         states[sid] = "error"
@@ -625,6 +713,7 @@ async def teardown(sid: str, reason: str = ""):
         return
     log.info("teardown sid=%s ct=%s (%s)", sid[:12], s["ct"], reason)
     inc("handover_teardowns_total", reason=reason or "unknown")
+    events([(int(time.time()), s["ct"], "end", max(s.get("counted") or [s.get("start", 0)]), reason)])
     with contextlib.suppress(ProcessLookupError, AttributeError):
         s["proc"].terminate()
     await run("incus", "delete", "-f", s["ct"])
@@ -737,6 +826,11 @@ insides &middot; processes, signals and cron. 21 levels, four acts.</p>
 <h2>Fair play</h2>
 <p class=dim>Everyone gets the same passwords, so yes, you could look them up. It's your game
 to spoil. The leaderboard only counts runs that climb every level.</p>
+
+<h2>What we record</h2>
+<p class=dim>To see where people get stuck: when each level is reached, and the names of the
+commands used on it (<code>find</code>, <code>grep</code>&hellip; never what you type after
+them). Not tied to your GitHub account.</p>
 
 <p style="margin-top:2rem;text-align:center"><a href="/">&larr; back to play</a></p>
 </main></body></html>"""
@@ -1215,7 +1309,8 @@ async def on_start(app):
                          "created": s.get("created", time.time()), "last": time.time(),
                          "start": start, "passes": {}, "drop": [], "note": "",
                          "image": s.get("image") or await container_image(s["ct"]),
-                         "counted": s.get("counted", [])}
+                         "counted": s.get("counted", []),
+                         "cmd_cursor": s.get("cmd_cursor", "")}
     if sessions:
         log.info("re-adopted %d live session(s) after restart", len(sessions))
     save_state()
