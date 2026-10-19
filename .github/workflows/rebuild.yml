@@ -6,8 +6,19 @@ name: rebuild
 # playbook + spawner) -> image (bandit-wannabe's deploy-image with its latest
 # passing ci run on main) -> verify. Safe on a healthy host too: each step is
 # idempotent (a no-op plan, an image that's already live).
+#
+# Two runs, one click: GitHub hands a run its secrets when it starts, and the
+# infra step (re)writes several (service token, host key, tunnel token). So
+# after infra, this run starts a second run with stage=host, which gets the
+# fresh secrets, and waits for it (found in drill B: from scratch, the later
+# jobs saw the secrets as they were before the apply -- empty).
 on:
   workflow_dispatch:
+    inputs:
+      stage:
+        description: "all (default) | host: skip infra, run reach -> host -> image -> verify"
+        required: false
+        default: all
 
 concurrency: rebuild
 
@@ -16,12 +27,36 @@ permissions:
 
 jobs:
   infra:
+    if: inputs.stage != 'host'
     uses: ./.github/workflows/terraform.yml
     secrets:
       TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
 
-  reach:
+  continue:
     needs: infra
+    if: inputs.stage != 'host'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write    # start the stage=host run
+    steps:
+      - name: Run the host stage with fresh secrets, and wait for it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          before=$(gh run list -R "$REPO" -w rebuild.yml -L 1 --json databaseId -q '.[0].databaseId // 0')
+          gh workflow run rebuild.yml -R "$REPO" --ref "$GITHUB_REF_NAME" -f stage=host
+          for _ in $(seq 30); do
+            id=$(gh run list -R "$REPO" -w rebuild.yml -L 1 --json databaseId -q '.[0].databaseId // 0')
+            [ "$id" != "$before" ] && [ "$id" != "$GITHUB_RUN_ID" ] && break
+            sleep 4
+          done
+          [ "$id" != "$before" ] && [ "$id" != "$GITHUB_RUN_ID" ] || { echo "::error::host stage didn't start"; exit 1; }
+          echo "host stage: https://github.com/$REPO/actions/runs/$id" | tee -a "$GITHUB_STEP_SUMMARY"
+          gh run watch "$id" -R "$REPO" --exit-status
+
+  reach:
+    if: inputs.stage == 'host'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
