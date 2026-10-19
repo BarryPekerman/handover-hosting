@@ -10,6 +10,9 @@ on:
   pull_request:
     paths: ["infra/**"]
   workflow_dispatch:
+  workflow_call:       # rebuild.yml runs the apply as one step of a rebuild
+    secrets:
+      TF_API_TOKEN: { required: true }
 
 concurrency: terraform
 
