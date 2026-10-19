@@ -24,6 +24,19 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "handover" {
   }
 }
 
+# On destroy the instance goes first, but Cloudflare keeps listing its tunnel
+# connections for a minute or two and refuses to delete a tunnel that has any
+# (drill B, 2026-10-19). This sits between them: destroying it waits, so the
+# tunnel is deleted only after the dead connections have expired. Creating it
+# is instant.
+resource "time_sleep" "tunnel_drain" {
+  destroy_duration = "120s"
+  depends_on = [
+    cloudflare_zero_trust_tunnel_cloudflared.handover,
+    cloudflare_zero_trust_tunnel_cloudflared_config.handover,
+  ]
+}
+
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "handover" {
   account_id = local.cf_account
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.handover.id
