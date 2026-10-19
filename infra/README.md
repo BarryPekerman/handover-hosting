@@ -63,6 +63,13 @@ Measured in the drill (2026-10-19, instance only): destroy 2m15s, create
 2m09s, tunnel up by itself 1m59s, deploy.yml 3m36s, deploy-image 59s — about
 **11 minutes of automation**, plus the time to start each workflow.
 
+Drill B (2026-10-19, everything Terraform manages except the VCN's default
+security list): teardown ~3 min (the tunnel delete races Cloudflare releasing
+the dead box's connections: retry it, or `state rm` after deleting by hand);
+`rebuild.yml` from scratch ~7.5 min (infra 54s, reach 8s, deploy 4m35s, image
+1m15s). Found: a run's secrets are fixed at start, so the host stage now runs
+as a second run.
+
 `prevent_destroy` guards the instance, the tunnel, the `play` record and the
 security list. On free-tier A1 a true rebuild means terminating the old box
 first, which risks not getting the capacity back; do it knowingly.
