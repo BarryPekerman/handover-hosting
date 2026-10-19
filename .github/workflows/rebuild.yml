@@ -1,0 +1,104 @@
+name: rebuild
+
+# The whole host, from code, in one approval:
+#   gh workflow run rebuild.yml -R BarryPekerman/handover-hosting
+# infra (terraform apply) -> reach (tunnel up, ssh works) -> host (deploy.yml:
+# playbook + spawner) -> image (bandit-wannabe's deploy-image with its latest
+# passing ci run on main) -> verify. Safe on a healthy host too: each step is
+# idempotent (a no-op plan, an image that's already live).
+on:
+  workflow_dispatch:
+
+concurrency: rebuild
+
+permissions:
+  contents: read
+
+jobs:
+  infra:
+    uses: ./.github/workflows/terraform.yml
+    secrets:
+      TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+
+  reach:
+    needs: infra
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Wait until the host is reachable through the tunnel
+        uses: ./.github/actions/tunnel-ssh
+        with:
+          ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          access-client-id: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          access-client-secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          wait-seconds: "900"   # a new instance: boot + cloud-init + tunnel
+
+  host:
+    needs: reach
+    uses: ./.github/workflows/deploy.yml
+    secrets:
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
+      TURNSTILE_SITEKEY: ${{ secrets.TURNSTILE_SITEKEY }}
+      TURNSTILE_SECRET: ${{ secrets.TURNSTILE_SECRET }}
+      GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+
+  image:
+    needs: host
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.REBUILD_GH_TOKEN }}   # Actions read/write on bandit-wannabe only
+      REPO: BarryPekerman/bandit-wannabe
+    steps:
+      - name: Ship bandit-wannabe's latest tested image
+        run: |
+          run_id=$(gh run list -R "$REPO" -w ci.yml -b main -L 20 --json databaseId,conclusion,event \
+            -q '[.[] | select(.conclusion == "success" and .event == "push")][0].databaseId')
+          [ -n "$run_id" ] || { echo "::error::no passing ci run on main"; exit 1; }
+          echo "image from ci run $run_id"
+          before=$(gh run list -R "$REPO" -w deploy-image.yml -L 1 --json databaseId -q '.[0].databaseId // 0')
+          gh workflow run deploy-image.yml -R "$REPO" -f run_id="$run_id"
+          for _ in $(seq 30); do
+            id=$(gh run list -R "$REPO" -w deploy-image.yml -L 1 --json databaseId -q '.[0].databaseId // 0')
+            [ "$id" != "$before" ] && break
+            sleep 4
+          done
+          [ "$id" != "$before" ] || { echo "::error::deploy-image didn't start"; exit 1; }
+          echo "deploy-image: https://github.com/$REPO/actions/runs/$id"
+          gh run watch "$id" -R "$REPO" --exit-status
+
+  verify:
+    needs: image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/tunnel-ssh
+        with:
+          ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          access-client-id: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          access-client-secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      - name: The game answers and a player box starts
+        run: |
+          curl -fsS https://play.barrypekerman.com/healthz
+          echo
+          scp tests/vm/smoke-box.sh handover:/tmp/smoke-box.sh
+          ssh handover 'bash /tmp/smoke-box.sh </dev/null; rc=$?; rm -f /tmp/smoke-box.sh; exit $rc'
+      - name: Timing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### Rebuild timing"
+            gh run view "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" --json jobs \
+              -q '.jobs[] | select(.completedAt != null and .startedAt != null) | "- \(.name): \((((.completedAt | fromdate) - (.startedAt | fromdate)) / 60 | floor))m \((((.completedAt | fromdate) - (.startedAt | fromdate)) % 60))s"'
+          } >> "$GITHUB_STEP_SUMMARY"

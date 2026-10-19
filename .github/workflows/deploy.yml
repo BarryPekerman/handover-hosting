@@ -11,6 +11,17 @@ name: deploy
 # Pushes to master only run the checks in ci.yml.
 on:
   workflow_dispatch:
+  workflow_call:       # rebuild.yml runs it as one step of a rebuild
+    secrets:
+      DEPLOY_SSH_KEY: { required: true }
+      DEPLOY_KNOWN_HOSTS: { required: true }
+      CF_ACCESS_CLIENT_ID: { required: true }
+      CF_ACCESS_CLIENT_SECRET: { required: true }
+      CF_TUNNEL_TOKEN: { required: true }
+      TURNSTILE_SITEKEY: { required: true }
+      TURNSTILE_SECRET: { required: true }
+      GH_CLIENT_SECRET: { required: true }
+      SESSION_SECRET: { required: true }
 
 concurrency: deploy        # never overlap two deploys
 

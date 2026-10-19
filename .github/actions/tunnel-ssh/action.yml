@@ -8,6 +8,10 @@ inputs:
   known-hosts: { description: "pinned host key line (DEPLOY_KNOWN_HOSTS)", required: true }
   access-client-id: { description: "CF_ACCESS_CLIENT_ID", required: true }
   access-client-secret: { description: "CF_ACCESS_CLIENT_SECRET", required: true }
+  wait-seconds:
+    description: "keep retrying the first connection this long (a box still booting)"
+    required: false
+    default: "0"
 runs:
   using: composite
   steps:
@@ -17,6 +21,7 @@ runs:
         KNOWN_HOSTS: ${{ inputs.known-hosts }}
         CF_ID: ${{ inputs.access-client-id }}
         CF_SECRET: ${{ inputs.access-client-secret }}
+        WAIT: ${{ inputs.wait-seconds }}
       run: |
         curl -fsSL -o /tmp/cloudflared.deb \
           https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-amd64.deb
@@ -41,4 +46,9 @@ runs:
           StrictHostKeyChecking yes
           ProxyCommand ~/.ssh/cf-proxy %h
         CFG
-        ssh handover true && echo "ssh handover: ok (through the tunnel)"
+        deadline=$(( $(date +%s) + WAIT ))
+        until ssh -o ConnectTimeout=15 handover true; do
+          [ "$(date +%s)" -lt "$deadline" ] || { echo "::error::host not reachable through the tunnel"; exit 1; }
+          echo "not reachable yet, retrying…"; sleep 15
+        done
+        echo "ssh handover: ok (through the tunnel)"
