@@ -53,7 +53,7 @@
   tasks:
     - name: Packages
       ansible.builtin.apt:
-        name: [incus, incus-client, ttyd, python3-aiohttp, fail2ban]
+        name: [incus, incus-client, btrfs-progs, ttyd, python3-aiohttp, fail2ban]
         state: present
         update_cache: true
         cache_valid_time: 3600
