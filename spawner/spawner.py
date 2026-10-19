@@ -1202,7 +1202,10 @@ async def h_proxy(request):
     upstream = f"http://127.0.0.1:{s['port']}{request.rel_url}"
 
     if request.headers.get("Upgrade", "").lower() == "websocket":
-        ws_server = web.WebSocketResponse(protocols=("tty",))
+        # heartbeat: ping the browser every 30 s. Cloudflare closes a WebSocket
+        # with no traffic for 100 s, so a player who stopped typing to read
+        # lost the terminal every ~2 minutes.
+        ws_server = web.WebSocketResponse(protocols=("tty",), heartbeat=30)
         await ws_server.prepare(request)
         live_ws.add(ws_server)                    # so on_shutdown can close it
         try:
