@@ -10,6 +10,10 @@
 - name: Handover host
   hosts: all
   become: true
+  # Run pending handlers even if a later task fails: otherwise a change made
+  # before the failure (e.g. a sysctl file) is never applied, and the next run
+  # sees the file unchanged and doesn't apply it either.
+  force_handlers: true
   vars:
     cloudflared_version: "2026.10.1"
     # Run token for the Terraform-made tunnel (infra/tunnel.tf). deploy.yml
