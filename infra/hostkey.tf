@@ -6,13 +6,7 @@ resource "tls_private_key" "host" {
 }
 
 locals {
-  # The current box predates this key; keep trusting its own key until it is
-  # replaced (drop this line after the rebuild).
-  live_host_key = "handover-ssh.barrypekerman.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEOEGCagc6gLOFxeSBXN+laNI0VuKDHi5uMNNmgxEbEh"
-  known_hosts = join("\n", [
-    "handover-ssh.barrypekerman.com ${trimspace(tls_private_key.host.public_key_openssh)}",
-    local.live_host_key,
-  ])
+  known_hosts = "handover-ssh.barrypekerman.com ${trimspace(tls_private_key.host.public_key_openssh)}"
 }
 
 resource "github_actions_secret" "deploy_known_hosts" {
