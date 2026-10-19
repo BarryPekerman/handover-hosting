@@ -17,6 +17,10 @@ terraform {
       source  = "hashicorp/tls"
       version = "4.4.1"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "0.14.2"
+    }
   }
   # State and runs live in Terraform Cloud (org berries-handover, project
   # handover) — its own org, so this repo's token reaches nothing else.
@@ -107,6 +111,10 @@ resource "oci_core_instance" "handover" {
       host_key_public     = trimspace(tls_private_key.host.public_key_openssh)
     }))
   }
+
+  # Destroyed before the tunnel drain wait, so the tunnel outlives its dead
+  # connections (tunnel.tf).
+  depends_on = [time_sleep.tunnel_drain]
 
   # Free A1 capacity is scarce: never let a plan silently destroy/replace the
   # live box. A newer base image or an edited cloud-init must NOT trigger a
