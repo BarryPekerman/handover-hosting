@@ -1,7 +1,7 @@
 #!/bin/bash
 # End-to-end spawner check against bandit-wannabe's Vagrant VM (make local-up
 # there first): real spawner + ttyd + tmux, with a fake `incus` that forwards
-# into the VM. Runs the seven scenarios in scenarios.sh, then cleans up.
+# into the VM. Runs the eight scenarios in scenarios.sh, then cleans up.
 #   PYTHON=<python with aiohttp>  BANDIT=<path to bandit-wannabe>  tests/vm/run.sh
 set -euo pipefail
 HERE=$(dirname "$(readlink -f "$0")")

@@ -8,7 +8,10 @@ tests/README.md.
 import asyncio
 import json
 import os
+import sqlite3
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "spawner"))
 import spawner as sp  # noqa: E402
@@ -27,12 +30,19 @@ class Req:
             self.cookies["ghid"] = sp._sign({"uid": uid, "login": "u" + str(uid)})
 
 
+@pytest.fixture(autouse=True)
+def tmp_db(tmp_path):
+    sp.DB_PATH = str(tmp_path / "lb.db")
+
+
 def setup_function():
     sp.SESSION_SECRET = "test-secret"
     sp.sessions.clear()
     sp.who.clear()
     sp.states.clear()
     sp.live_image = ""
+    sp.counters.clear()
+    sp.solve_hist.clear()
 
 
 def box(sid, uid=None, **kw):
@@ -150,8 +160,6 @@ def test_outdated_and_reached_level():
 # ---- metrics -------------------------------------------------------------
 
 def test_progress_counted_once_per_box():
-    sp.counters.clear()
-    sp.solve_hist.clear()
     box("s1")
     s = sp.sessions["s1"]
     sp.count_progress(s, {0: 100, 1: 160})
@@ -166,8 +174,36 @@ def test_progress_counted_once_per_box():
 
 
 def test_resumed_box_does_not_time_levels_before_its_start():
-    sp.counters.clear()
-    sp.solve_hist.clear()
     box("s1", start=5)
     sp.count_progress(sp.sessions["s1"], {4: 10, 5: 20, 6: 80})
     assert list(sp.solve_hist) == [5]
+
+
+def test_long_breaks_stay_out_of_the_histogram_but_in_events():
+    box("s1", ct="p-1")
+    sp.count_progress(sp.sessions["s1"], {0: 0, 1: sp.SOLVE_CAP + 1, 2: sp.SOLVE_CAP + 61})
+    assert list(sp.solve_hist) == [1]                                   # level 0 was capped
+    assert sp.counters[("handover_level_solve_capped_total", (("level", "0"),))] == 1
+    rows = sqlite3.connect(sp.DB_PATH).execute("SELECT ts, box, kind, level FROM events").fetchall()
+    assert rows == [(0, "p-1", "reach", 0), (sp.SOLVE_CAP + 1, "p-1", "reach", 1),
+                    (sp.SOLVE_CAP + 61, "p-1", "reach", 2)]
+
+
+def test_commands_from_the_journal():
+    out = "\n".join([
+        "U 1001 level3", "U 1022 dave",
+        json.dumps({"__CURSOR": "c1", "_UID": "1001", "MESSAGE": "find", "__REALTIME_TIMESTAMP": "5000000"}),
+        json.dumps({"__CURSOR": "c2", "_UID": "1001", "MESSAGE": "rm -rf /"}),     # not a name
+        json.dumps({"__CURSOR": "c3", "_UID": "0", "MESSAGE": "ls"}),              # not a player
+        json.dumps({"__CURSOR": "c4", "_UID": "1022", "MESSAGE": "frobnicate", "__REALTIME_TIMESTAMP": "7000000"}),
+        "garbage",
+    ])
+    found, cursor = sp.parse_commands(out)
+    assert found == [(5, 3, "find"), (7, sp.WIN_INDEX, "frobnicate")]
+    assert cursor == "c4"
+    box("s1", ct="p-1")
+    sp.count_commands(sp.sessions["s1"], found)
+    assert 'handover_commands_total{cmd="find",level="3"} 1' in sp.render_metrics()
+    assert 'handover_commands_total{cmd="other",level="21"} 1' in sp.render_metrics()
+    kinds = sqlite3.connect(sp.DB_PATH).execute("SELECT kind, detail FROM events").fetchall()
+    assert kinds == [("cmd", "find"), ("cmd", "frobnicate")]
