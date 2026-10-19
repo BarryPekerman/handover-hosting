@@ -54,7 +54,9 @@ jobs:
           ansible-playbook -i handover, --diff host/site.yml
 
       - name: Copy spawner
-        run: scp spawner/spawner.py handover:~/spawner.py
+        run: |
+          scp spawner/spawner.py handover:~/spawner.py
+          scp -r spawner/static handover:~/   # link-preview image, favicon
 
       - name: Inject secrets, restart (non-destructive)
         env:

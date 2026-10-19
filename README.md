@@ -1,10 +1,46 @@
 # handover-hosting
 
-The hosted side of **The Handover** CTF: a spawner that hands each browser
-visitor their own isolated Incus container running the game, reachable through
-a single port (so Cloudflare Tunnel can terminate upstream, no inbound ports on
-the VM). Game content comes from the `bandit-wannabe` repo's `handover` Incus
-image; this project only does hosting.
+The hosting for **[The Handover](https://play.barrypekerman.com)**, a Linux &
+DevOps wargame you play in the browser. Dave won the lottery and left you his
+server; nothing is documented. Press play and you get your own Linux box: no
+install, no signup, nobody else on it.
+
+This repo runs it on one Oracle Cloud Always Free ARM instance. The game itself
+(21 levels built by Ansible into an Incus image, with an automated solver and
+leak scan in CI) lives in a separate, private repo, so the solutions stay off
+GitHub.
+
+```mermaid
+flowchart LR
+  P[Player's browser] -->|HTTPS| CF[Cloudflare<br/>Turnstile, Access]
+  CF -->|tunnel, no open ports| S
+  subgraph VM[OCI A1 VM]
+    S[spawner<br/>aiohttp] -->|incus launch| C1[player box 1]
+    S --> C2[player box 2]
+    S -.->|ttyd + WebSocket proxy| C1
+  end
+  GH[GitHub Actions] -->|deploy, rebuild| VM
+  TFC[Terraform Cloud] -->|VM, DNS, tunnel, Access| VM
+  M[Prometheus + Grafana<br/>on OKE] -->|scrape through the tunnel| S
+```
+
+**Design choices**
+
+- **A container per player, with no network device.** The levels use SUID,
+  sudo, processes and cron, so a shared box would let players break each other's
+  games. The terminal rides `incus exec` over the control socket; a box has only
+  `lo` and reaches neither other players, the host nor the internet.
+- **No inbound ports.** Cloudflare Tunnel carries the game; SSH for CI and admin
+  goes through Cloudflare Access. The VM's security list allows only ping.
+- **One-click rebuild.** `rebuild.yml` recreates the VM, DNS, tunnel and secrets
+  from Terraform, then deploys; rehearsed from nothing in about 10 minutes.
+- **Approval is a manual dispatch.** Pushes only run checks; deploys run when
+  someone starts them. The game image is built and tested once, then promoted.
+- **Monitoring from outside.** Prometheus in a separate OKE cluster
+  ([oci-oke-infra](https://github.com/BarryPekerman/oci-oke-infra)) scrapes the
+  spawner and node-exporter through Access-protected tunnel routes.
+- **Free tier throughout:** OCI Always Free, Cloudflare free, Terraform Cloud
+  free, GitHub Actions.
 
 ## Host prerequisites (OCI A1, Ubuntu 24.04 ARM)
 
@@ -75,12 +111,12 @@ rides `incus exec` over the control socket, so a player reaches neither other
 players, the host, nor the internet. Isolation is by absence, not by firewall
 rule. Verified: a player container has only `lo`.
 
-## Open
+## Devices
 
-- [ ] Mobile key-bar (Esc/Ctrl/Tab/arrows) for phone play.
-- [ ] Lock the OCI security list to the admin IP (parked: the admin IP rotates;
-      fail2ban covers the noise).
+It's a terminal game, so it's played with a keyboard: best on a computer. On a
+phone you can read the story and look around; sign in with GitHub and the same
+box opens on every device, so you can pick it up on a laptop.
 
 Day-to-day operation: `docs/ops-notes.md`.
 
-Design rationale: `bandit-wannabe/HOSTING.md`.
+Design rationale: `HOSTING.md` in the (private) game repo.
