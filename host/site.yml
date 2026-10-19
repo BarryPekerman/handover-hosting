@@ -24,11 +24,14 @@
         limits.processes: "300"
         # The game never uses /dev/incus/sock; it would leak the host name.
         security.guestapi: "false"
+        # Each box its own uid range: per-uid host limits (inotify) aren't
+        # shared across boxes, and an escape lands in no other box's uids.
+        security.idmap.isolated: "true"
       devices:
         eth0: { type: none }        # no NIC: isolation by absence
-        # ~70 MiB used per player in practice (btrfs shares the image); 20 x 1 GiB
-        # fits the 30 GiB pool, so a full house of full quotas cannot fill it.
-        root: { path: /, pool: games, size: 1GiB, type: disk }
+        # ~50 MiB used per player in practice (btrfs shares the image); 40 x 512
+        # MiB fits the 30 GiB pool, so a full house of full quotas cannot fill it.
+        root: { path: /, pool: games, size: 512MiB, type: disk }
 
   handlers:
     - name: Apply sysctls
@@ -71,7 +74,7 @@
         dest: /etc/sysctl.d/99-handover.conf
         mode: "0644"
         content: |
-          fs.inotify.max_user_instances = 1024
+          fs.inotify.max_user_instances = 8192
           fs.inotify.max_user_watches = 524288
           kernel.yama.ptrace_scope = 1
           kernel.dmesg_restrict = 1
