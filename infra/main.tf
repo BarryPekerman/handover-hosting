@@ -13,6 +13,10 @@ terraform {
       source  = "integrations/github"
       version = "6.13.0"
     }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "4.4.1"
+    }
   }
   # State and runs live in Terraform Cloud (org berries-handover, project
   # handover) — its own org, so this repo's token reaches nothing else.
@@ -89,10 +93,18 @@ resource "oci_core_instance" "handover" {
   }
 
   metadata = {
-    ssh_authorized_keys = var.ssh_public_key
+    # The admin key plus both repos' deploy keys: CI must log in to a fresh box
+    # before the playbook (which also manages these keys) has ever run.
+    ssh_authorized_keys = join("\n", [
+      var.ssh_public_key,
+      trimspace(file("${path.module}/../host/deploy-keys/bandit-wannabe.pub")),
+      trimspace(file("${path.module}/../host/deploy-keys/handover-hosting.pub")),
+    ])
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
       tunnel_token        = data.cloudflare_zero_trust_tunnel_cloudflared_token.handover.token
       cloudflared_version = "2026.10.1" # keep in step with host/site.yml
+      host_key_private    = tls_private_key.host.private_key_openssh
+      host_key_public     = trimspace(tls_private_key.host.public_key_openssh)
     }))
   }
 
