@@ -50,6 +50,15 @@ top. Not player-facing.
   revoke a repo's access: remove its line from `~ubuntu/.ssh/authorized_keys`
   and its file + loop entry from `host/site.yml`. The admin key
   (`handover`) is in no repo.
+- **Monitoring:** the OKE cluster's Prometheus (repo `oke-gitops`) scrapes
+  the spawner's `/metrics` (`127.0.0.1:9101`: players, seats, box
+  starts/teardowns/resumes, the level funnel, time per level, finishes) and
+  node-exporter (`127.0.0.1:9100`) through tunnel routes `handover-metrics` /
+  `handover-node`. An Access app lets only the `oke-prometheus` service token
+  through (`infra/metrics.tf`). Alerts go to Telegram; the "The Handover"
+  Grafana dashboard is in `oke-gitops`. Counters restart with the spawner; a
+  box's counted levels are kept in the state file, so a restart doesn't count
+  them twice.
 - **Secrets:** `/home/ubuntu/handover-spawner.env` (git-ignored, host-only):
   `SESSION_SECRET`, `GH_CLIENT_SECRET`, `TURNSTILE_SECRET`. Tunnel creds are
   cloudflared's. Nothing sensitive is in git or the image.
@@ -67,7 +76,8 @@ compartment `handover`). Host config is `host/site.yml`, applied by
 ssh handover                                          # get on the box (tunnel)
 
 # health / who's playing
-curl -s 127.0.0.1:8080/healthz                        # {"players":N,"max":20}
+curl -s 127.0.0.1:8080/healthz                        # {"players":N,"max":40}
+curl -s 127.0.0.1:9101/metrics                        # what Prometheus sees
 incus list -c ns -f compact                           # live containers
 cat ~/.handover-sessions.json | python3 -m json.tool  # sid -> container/port
 
@@ -191,6 +201,11 @@ which it ignores.)
 - **Seat behaviour under real load** (squatting, cap at 20, 60-min reclaim).
 
 ## Change log
+
+- **2026-10-19:** metrics for the OKE Prometheus (spawner `/metrics`,
+  node-exporter, tunnel routes + Access app `handover-metrics`). Rotating the
+  `oke-prometheus` token means re-encrypting `prometheus-cf-access` in
+  `oke-gitops` from the new Terraform outputs.
 
 - **2026-10-18** (deployed through the new pipelines unless marked):
   - Pipelines: image built/tested in bandit-wannabe CI and shipped by
