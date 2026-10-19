@@ -297,3 +297,29 @@ def test_static_images_are_served():
         asyncio.run(go())
     finally:
         sp.make_app = orig
+
+
+def test_player_data_endpoints():
+    from aiohttp.test_utils import TestClient, TestServer
+    A = "a" * 32
+    sp.db().close()
+    c = sqlite3.connect(sp.DB_PATH)
+    c.executemany("INSERT INTO events(ts,box,kind,level,detail,status,pid) VALUES(?,?,?,?,?,?,?)", [
+        (100, "p-1", "reach", 0, "", None, A), (130, "p-1", "cmd", 0, "cat readme", 0, A),
+        (140, "p-1", "badpass", 0, "level1", None, A), (160, "p-1", "reach", 1, "", None, A),
+        (170, "p-2", "cmd", 0, "ls", 0, None)])                       # no player id: left out
+    c.commit()
+
+    async def go():
+        async with TestClient(TestServer(sp.make_metrics_app())) as cl:
+            players = await (await cl.get("/data/players")).json()
+            assert len(players) == 1 and players[0]["player"] == "aaaaaaaa"
+            assert (players[0]["level"], players[0]["commands"], players[0]["wrong_passwords"]) == (1, 1, 1)
+            levels = await (await cl.get("/data/levels")).json()
+            assert levels[0]["solved"] == 1 and levels[0]["median_active_s"] == 60
+            assert levels[0]["top_commands"] == "cat 1"
+            tl = await (await cl.get("/data/player", params={"pid": A})).json()
+            assert [r["kind"] for r in tl] == ["reach", "cmd", "badpass", "reach"]
+            assert await (await cl.get("/data/player", params={"pid": "x' OR 1"})).json() == []
+            assert (await cl.get("/data/players")).status == 200
+    asyncio.run(go())
