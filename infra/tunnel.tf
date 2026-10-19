@@ -19,6 +19,9 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "handover" {
       { hostname = "play.barrypekerman.com", service = "http://localhost:8080" },
       # SSH for the admin and CI, behind the Access app in cloudflare.tf.
       { hostname = "handover-ssh.barrypekerman.com", service = "ssh://localhost:22" },
+      # Metrics for the OKE Prometheus, behind the Access app in metrics.tf.
+      { hostname = "handover-metrics.barrypekerman.com", service = "http://localhost:9101" },
+      { hostname = "handover-node.barrypekerman.com", service = "http://localhost:9100" },
       { service = "http_status:404" },
     ]
   }

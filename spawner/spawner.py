@@ -27,7 +27,7 @@ Config via env (all optional; secrets come from the EnvironmentFile):
   MAX_PLAYERS=20         IDLE_MIN=60        MAX_LIFETIME_MIN=1440
   OUTDATED_IDLE_MIN=5    (idle boxes on a replaced image are recycled)
   RATE_MAX=5 RATE_WINDOW=600   (new boxes per client IP per window, seconds)
-  TTYD_PORT_BASE=8100
+  TTYD_PORT_BASE=8100   METRICS_PORT=9101 (localhost-only /metrics)
   STATE_FILE=~/.handover-sessions.json   LEADERBOARD_DB=~/handover-leaderboard.db
   TURNSTILE_SITEKEY / TURNSTILE_ACTION=play / TURNSTILE_HOSTNAMES   bot check
   GH_CLIENT_ID                           GitHub OAuth app (public)
@@ -96,6 +96,79 @@ live_ws: set = set()                     # open terminal WebSockets, closed on s
 resume_req: dict[str, tuple] = {}        # sid -> (saved {level: pass}, server-known level, note)
 live_image = ""                          # fingerprint BASE_IMAGE points at now
 background: set = set()                  # running provision tasks (asyncio keeps only weak refs)
+
+# ---------- metrics: Prometheus text format on a localhost-only port ----------
+# Scraped by the OKE Prometheus through the tunnel route handover-metrics (Access
+# service token). Counters reset when the spawner restarts; Prometheus handles that.
+METRICS_PORT = int(os.environ.get("METRICS_PORT", "9101"))
+SOLVE_BUCKETS = (60, 180, 300, 600, 1200, 1800, 3600, 7200, 14400)  # seconds
+counters: dict[tuple, float] = {}        # (name, sorted label items) -> value
+solve_hist: dict[int, list] = {}         # level -> per-bucket counts + [+Inf count, sum]
+
+
+def inc(name: str, n: float = 1, **labels):
+    key = (name, tuple(sorted((k, str(v)) for k, v in labels.items())))
+    counters[key] = counters.get(key, 0) + n
+
+
+def observe_solve(level: int, secs: float):
+    h = solve_hist.setdefault(level, [0] * len(SOLVE_BUCKETS) + [0, 0.0])
+    for i, b in enumerate(SOLVE_BUCKETS):
+        if secs <= b:
+            h[i] += 1
+    h[-2] += 1
+    h[-1] += secs
+
+
+def count_progress(s: dict, reaches: dict[int, int]):
+    """Count each level a box reaches once (the funnel), and the time spent on
+    the level before it, when that level was played in this box."""
+    counted = s.setdefault("counted", [])
+    for idx in sorted(reaches):
+        if idx in counted:
+            continue
+        counted.append(idx)
+        inc("handover_level_reached_total", level=idx)
+        if idx - 1 in reaches and idx - 1 >= s.get("start", 0):
+            observe_solve(idx - 1, max(0, reaches[idx] - reaches[idx - 1]))
+        if idx == WIN_INDEX:
+            ranked = s.get("start", 0) == 0 and all(i in reaches for i in range(WIN_INDEX + 1))
+            inc("handover_finishes_total", ranked=str(ranked).lower())
+
+
+def _labels(items) -> str:
+    return "{" + ",".join(f'{k}="{v}"' for k, v in items) + "}" if items else ""
+
+
+def render_metrics() -> str:
+    out = [
+        "# TYPE handover_players gauge", f"handover_players {len(sessions)}",
+        "# TYPE handover_seats gauge", f"handover_seats {MAX_PLAYERS}",
+        "# TYPE handover_starting gauge",
+        f"handover_starting {sum(1 for v in states.values() if v == 'pending')}",
+        "# TYPE handover_info gauge", f'handover_info{{image="{live_image[:12]}"}} 1',
+        "# TYPE handover_player_level gauge",
+    ]
+    at = {}
+    for x in sessions.values():
+        lvl = max(x.get("counted") or [x.get("start", 0)])
+        at[lvl] = at.get(lvl, 0) + 1
+    out += [f'handover_player_level{{level="{lvl}"}} {n}' for lvl, n in sorted(at.items())]
+    for name in sorted({k[0] for k in counters}):
+        out.append(f"# TYPE {name} counter")
+        out += [f"{name}{_labels(items)} {v:g}" for (n, items), v in sorted(counters.items()) if n == name]
+    out.append("# TYPE handover_level_solve_seconds histogram")
+    for lvl, h in sorted(solve_hist.items()):
+        for b, c in zip(SOLVE_BUCKETS, h, strict=False):
+            out.append(f'handover_level_solve_seconds_bucket{{level="{lvl}",le="{b}"}} {c}')
+        out.append(f'handover_level_solve_seconds_bucket{{level="{lvl}",le="+Inf"}} {h[-2]}')
+        out.append(f'handover_level_solve_seconds_count{{level="{lvl}"}} {h[-2]}')
+        out.append(f'handover_level_solve_seconds_sum{{level="{lvl}"}} {h[-1]:g}')
+    return "\n".join(out) + "\n"
+
+
+async def h_metrics(request):
+    return web.Response(text=render_metrics(), content_type="text/plain")
 
 
 def db():
@@ -251,6 +324,8 @@ async def update_progress(sid: str, ct: str):
     key = info["uid"] or ("anon:" + sid)
     reaches = await read_reaches(ct)
     s = sessions.get(sid)
+    if s is not None:
+        count_progress(s, reaches)
     if s is not None:   # remember reached levels' passwords for the browser's save
         new = [n for n in reaches if n not in s["passes"]]
         s["passes"].update(await read_passes(ct, new))
@@ -396,6 +471,7 @@ def save_state():
     """Persist sessions (minus the live proc handle) so a restart can re-adopt them."""
     try:
         data = {sid: {**{k: s[k] for k in ("ct", "port", "created", "last", "start", "image")},
+                      "counted": s.get("counted", []),
                       "who": who.get(sid, {"uid": None, "display": "anonymous"})}
                 for sid, s in sessions.items()}
         tmp = STATE_FILE + ".tmp"
@@ -507,6 +583,7 @@ async def choose_start(ct: str, req) -> tuple[int, list, str]:
     good = [n for n, p in saved.items() if n in real and hmac.compare_digest(p, real[n])]
     drop = sorted(n for n in saved if n not in good)
     start = max([*good, srv])
+    inc("handover_resumes_total", outcome="resumed" if start else ("no_match" if drop else "nothing_saved"))
     if start:
         note = f"resumed at level {start}"
     elif drop:
@@ -525,6 +602,7 @@ async def provision_bg(sid: str):
     except Exception:
         log.exception("provision failed sid=%s", sid)
         states[sid] = "error"
+    inc("handover_box_starts_total", result=states[sid])
 
 
 def start_provision(sid: str):
@@ -546,6 +624,7 @@ async def teardown(sid: str, reason: str = ""):
     if not s:
         return
     log.info("teardown sid=%s ct=%s (%s)", sid[:12], s["ct"], reason)
+    inc("handover_teardowns_total", reason=reason or "unknown")
     with contextlib.suppress(ProcessLookupError, AttributeError):
         s["proc"].terminate()
     await run("incus", "delete", "-f", s["ct"])
@@ -1135,11 +1214,18 @@ async def on_start(app):
         sessions[sid] = {"ct": s["ct"], "port": s["port"], "proc": proc,
                          "created": s.get("created", time.time()), "last": time.time(),
                          "start": start, "passes": {}, "drop": [], "note": "",
-                         "image": s.get("image") or await container_image(s["ct"])}
+                         "image": s.get("image") or await container_image(s["ct"]),
+                         "counted": s.get("counted", [])}
     if sessions:
         log.info("re-adopted %d live session(s) after restart", len(sessions))
     save_state()
     app["reaper"] = asyncio.create_task(reaper(app))
+    # Metrics on their own localhost-only port: play.barrypekerman.com can't reach them.
+    mapp = web.Application()
+    mapp.router.add_get("/metrics", h_metrics)
+    app["metrics_runner"] = web.AppRunner(mapp)
+    await app["metrics_runner"].setup()
+    await web.TCPSite(app["metrics_runner"], "127.0.0.1", METRICS_PORT).start()
 
 
 async def on_shutdown(app):
@@ -1157,6 +1243,7 @@ async def on_cleanup(app):
     # containers — on_start re-adopts them, so a restart no longer resets players.
     app["reaper"].cancel()
     save_state()
+    await app["metrics_runner"].cleanup()
 
 
 def make_app():

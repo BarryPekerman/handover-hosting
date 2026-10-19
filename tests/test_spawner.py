@@ -145,3 +145,29 @@ def test_outdated_and_reached_level():
     sp.live_image = "img2"
     assert sp.outdated(sp.sessions["s1"])
     assert sp.reached_level(sp.sessions["s1"]) == 5
+
+
+# ---- metrics -------------------------------------------------------------
+
+def test_progress_counted_once_per_box():
+    sp.counters.clear()
+    sp.solve_hist.clear()
+    box("s1")
+    s = sp.sessions["s1"]
+    sp.count_progress(s, {0: 100, 1: 160})
+    sp.count_progress(s, {0: 100, 1: 160, 2: 400})          # next poll: only level 2 is new
+    reached = {dict(k[1])["level"]: v for k, v in sp.counters.items()
+               if k[0] == "handover_level_reached_total"}
+    assert reached == {"0": 1, "1": 1, "2": 1}
+    assert sp.solve_hist[0][-2:] == [1, 60] and sp.solve_hist[1][-2:] == [1, 240]
+    text = sp.render_metrics()
+    assert 'handover_level_solve_seconds_bucket{level="1",le="300"} 1' in text
+    assert 'handover_player_level{level="2"} 1' in text
+
+
+def test_resumed_box_does_not_time_levels_before_its_start():
+    sp.counters.clear()
+    sp.solve_hist.clear()
+    box("s1", start=5)
+    sp.count_progress(sp.sessions["s1"], {4: 10, 5: 20, 6: 80})
+    assert list(sp.solve_hist) == [5]
