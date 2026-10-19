@@ -773,8 +773,28 @@ async def reaper(app):
 
 # ---------- HTTP handlers ----------
 
+# Favicon on every page, and the link preview (LinkedIn, Slack, chat apps build
+# their card from the og:/twitter: tags) on the pages people share. The images
+# are spawner/static/, copied next to spawner.py by deploy.yml.
+STATIC_DIR = os.environ.get("STATIC_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"))
+SHARE_DESC = ("Dave won the lottery and left you his server. Nothing is documented. "
+              "A Linux & DevOps wargame in your browser: your own box, 21 levels, nothing to install.")
+ICON = '<link rel=icon type=image/png href=/favicon.ico>'
+SHARE = ICON + f"""
+<meta name=description content="{SHARE_DESC}">
+<meta property=og:type content=website>
+<meta property=og:site_name content="The Handover">
+<meta property=og:title content="The Handover — a Linux & DevOps wargame">
+<meta property=og:description content="{SHARE_DESC}">
+<meta property=og:url content="{PUBLIC_URL}/">
+<meta property=og:image content="{PUBLIC_URL}/og.png">
+<meta property=og:image:width content=1200>
+<meta property=og:image:height content=627>
+<meta property=og:image:alt content="THE HANDOVER: Dave won the lottery and left you his server. Nothing is documented.">
+<meta name=twitter:card content=summary_large_image>"""
+
 LANDING = """<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
+<meta name=viewport content="width=device-width,initial-scale=1">""" + SHARE + """
 <title>The Handover</title><style>
 :root{color-scheme:dark}
 body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;
@@ -814,7 +834,7 @@ __TS_WIDGET__</form>
 # The premise lives here rather than on the front page; Dave's own voice is
 # kept for his first mail in the game (bandit-wannabe VOICE.md).
 STORY = """<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
+<meta name=viewport content="width=device-width,initial-scale=1">""" + SHARE + """
 <title>The Handover - story</title><style>
 :root{color-scheme:dark}
 body{margin:0;min-height:100vh;background:#000;color:#33ff66;font-family:monospace;
@@ -882,7 +902,7 @@ TS_FAIL = message_page("Are you human?", "couldn't verify you",
 
 
 LEADERBOARD = """<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
+<meta name=viewport content="width=device-width,initial-scale=1">""" + SHARE + """
 <title>The Handover - leaderboard</title><style>
 :root{color-scheme:dark}
 body{margin:0;min-height:100vh;background:#000;color:#33ff66;font-family:monospace;
@@ -898,7 +918,7 @@ a{color:#33ff66}p{opacity:.7}
 </body></html>"""
 
 SPAWNING = """<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
+<meta name=viewport content="width=device-width,initial-scale=1">""" + ICON + """
 <title>Spinning up…</title><style>
 :root{color-scheme:dark}
 body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;
@@ -920,7 +940,7 @@ async function poll(){
     const j=await r.json();
     if(j.state==="ready"){location.replace("/app/"+sid);return;}
     if(j.state==="full"){document.getElementById("msg").outerHTML=
-      "<p class=err>server full — all seats taken. <a style=color:#33ff66 href=/play>retry</a></p>";return;}
+      "<p class=err>server full — every seat is taken right now.<br>Seats free up as players go idle; try again in a few minutes. <a style=color:#33ff66 href=/play>retry</a></p>";return;}
     if(j.state==="error"){document.getElementById("msg").outerHTML=
       "<p class=err>something broke spinning up. <a style=color:#33ff66 href=/play>retry</a></p>";return;}
   }catch(e){}
@@ -943,7 +963,7 @@ function storeSave(lv){try{localStorage.setItem(SAVE_KEY,JSON.stringify({v:1,lev
 function topLevel(lv){var m=0;for(var k in lv)m=Math.max(m,+k);return m;}"""
 
 APP = """<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
+<meta name=viewport content="width=device-width,initial-scale=1">""" + ICON + """
 <title>The Handover</title><style>
 :root{color-scheme:dark}*{box-sizing:border-box}
 body{margin:0;height:100vh;display:flex;background:#000;color:#33ff66;
@@ -1371,6 +1391,16 @@ async def on_cleanup(app):
     await app["metrics_runner"].cleanup()
 
 
+async def h_static(request):
+    """og.png (link preview) and the favicon; cached for a day."""
+    name = {"/og.png": "og.png", "/favicon.ico": "favicon.png"}[request.path]
+    path = os.path.join(STATIC_DIR, name)
+    if not os.path.isfile(path):
+        raise web.HTTPNotFound()
+    return web.FileResponse(path, headers={"Content-Type": "image/png",
+                                           "Cache-Control": "public, max-age=86400"})
+
+
 def make_app():
     app = web.Application()
     app.add_routes([
@@ -1386,6 +1416,8 @@ def make_app():
         web.get("/auth/callback", h_callback),
         web.get("/logout", h_logout),
         web.get("/healthz", h_health),
+        web.get("/og.png", h_static),
+        web.get("/favicon.ico", h_static),
         web.route("*", "/t/{sid}/{tail:.*}", h_proxy),
     ])
     app.on_startup.append(on_start)
