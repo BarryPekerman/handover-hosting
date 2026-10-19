@@ -49,7 +49,7 @@ rows=$("$PY" -c "import sqlite3; print(sqlite3.connect('lb.db').execute('select 
 echo "6 leaderboard:    $rows   (want: every unranked = 1)"
 # 7. Metrics: the funnel counts levels reached, on the localhost-only port.
 m=$(curl -s http://127.0.0.1:9199/metrics)
-echo "7 metrics:        $(grep -c '^handover_level_reached_total' <<<"$m") levels, players $(grep '^handover_players ' <<<"$m" | cut -d' ' -f2), on play port: $(curl -s -o /dev/null -w '%{http_code}' "$U/metrics")   (want: >0 levels, players 3, 404)"
+echo "7 metrics:        $(grep '^handover_level_reached_total' <<<"$m" | grep -vc ' 0$') levels, players $(grep '^handover_players ' <<<"$m" | cut -d' ' -f2), on play port: $(curl -s -o /dev/null -w '%{http_code}' "$U/metrics")   (want: >0 levels, players 3, 404)"
 # 8. Events and commands: the box's reaches and logged command names land in
 #    the events table (the VM's journal has level0's test commands, if any).
 ev=$("$PY" -c "import sqlite3; print(dict(sqlite3.connect('lb.db').execute('select kind, count(*) from events group by kind').fetchall()))")
