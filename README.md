@@ -111,9 +111,11 @@ rides `incus exec` over the control socket, so a player reaches neither other
 players, the host, nor the internet. Isolation is by absence, not by firewall
 rule. Verified: a player container has only `lo`.
 
-## Open
+## Devices
 
-- [ ] Mobile key bar (Esc/Ctrl/Tab/arrows) for phone play.
+It's a terminal game, so it's played with a keyboard: best on a computer. On a
+phone you can read the story and look around; sign in with GitHub and the same
+box opens on every device, so you can pick it up on a laptop.
 
 Day-to-day operation: `docs/ops-notes.md`.
 
