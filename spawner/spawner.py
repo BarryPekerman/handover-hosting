@@ -123,6 +123,35 @@ def inc(name: str, n: float = 1, **labels):
     counters[key] = counters.get(key, 0) + n
 
 
+def init_counters():
+    """Every series with a known label set starts at 0, so a quiet game reads 0
+    on the dashboard instead of "No data" (and increase() sees the first event)."""
+    zero = [("handover_level_reached_total", {"level": i}) for i in range(WIN_INDEX + 1)]
+    zero += [("handover_level_solve_capped_total", {"level": i}) for i in range(WIN_INDEX)]
+    zero += [("handover_finishes_total", {"ranked": r}) for r in ("true", "false")]
+    zero += [("handover_resumes_total", {"outcome": o}) for o in ("resumed", "no_match", "nothing_saved")]
+    zero += [("handover_box_starts_total", {"result": r}) for r in ("ready", "full", "error")]
+    zero += [("handover_teardowns_total", {"reason": r})
+             for r in ("idle", "max-lifetime", "outdated-idle", "upgrade")]
+    zero += [("handover_errors_total", {})]
+    for name, labels in zero:
+        inc(name, 0, **labels)
+
+
+class CountErrors(logging.Handler):
+    """Every ERROR the spawner logs (incl. log.exception) counts in
+    handover_errors_total; the journal has the detail."""
+
+    def __init__(self):
+        super().__init__(logging.ERROR)
+
+    def emit(self, record):
+        inc("handover_errors_total")
+
+
+log.addHandler(CountErrors())
+
+
 def observe_solve(level: int, secs: float):
     h = solve_hist.setdefault(level, [0] * len(SOLVE_BUCKETS) + [0, 0.0])
     for i, b in enumerate(SOLVE_BUCKETS):
@@ -1286,6 +1315,7 @@ async def h_health(request):
 
 async def on_start(app):
     db().close()   # ensure the leaderboard table exists
+    init_counters()
     # Re-adopt containers that outlived a previous spawner (deploy/crash/reboot).
     # Incus keeps the containers running; only our in-memory map + ttyd procs are
     # lost, so clear any stale ttyd and respawn one per still-live container.

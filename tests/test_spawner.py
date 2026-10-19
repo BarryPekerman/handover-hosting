@@ -207,3 +207,26 @@ def test_commands_from_the_journal():
     assert 'handover_commands_total{cmd="other",level="21"} 1' in sp.render_metrics()
     kinds = sqlite3.connect(sp.DB_PATH).execute("SELECT kind, detail FROM events").fetchall()
     assert kinds == [("cmd", "find"), ("cmd", "frobnicate")]
+
+
+def test_quiet_game_reads_zero_not_missing():
+    sp.init_counters()
+    text = sp.render_metrics()
+    assert 'handover_level_reached_total{level="0"} 0' in text
+    assert f'handover_level_reached_total{{level="{sp.WIN_INDEX}"}} 0' in text
+    assert 'handover_box_starts_total{result="error"} 0' in text
+    assert "handover_errors_total 0" in text
+    sp.count_progress({"ct": "p-1"}, {0: 100})                 # init never resets real counts
+    sp.init_counters()
+    assert 'handover_level_reached_total{level="0"} 1' in sp.render_metrics()
+
+
+def test_logged_errors_are_counted():
+    sp.init_counters()
+    sp.log.error("boom")
+    try:
+        raise RuntimeError("x")
+    except RuntimeError:
+        sp.log.exception("provision failed")
+    sp.log.warning("not an error")
+    assert "handover_errors_total 2" in sp.render_metrics()
