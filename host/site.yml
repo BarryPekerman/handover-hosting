@@ -54,6 +54,11 @@
       ansible.builtin.systemd:
         daemon_reload: true
 
+    - name: Restart node exporter
+      ansible.builtin.systemd:
+        name: prometheus-node-exporter
+        state: restarted
+
     - name: Restart tunnel connector
       ansible.builtin.systemd:
         name: cloudflared-tf
@@ -246,6 +251,22 @@
         - /home/ubuntu/.cloudflared
       notify: Reload systemd
 
+    # Host metrics for the OKE Prometheus, which scrapes them through the
+    # tunnel (handover-node, Access service token). Localhost only.
+    - name: Node exporter
+      ansible.builtin.apt:
+        name: prometheus-node-exporter
+        install_recommends: false
+        state: present
+
+    - name: Node exporter listens on localhost only
+      ansible.builtin.copy:
+        dest: /etc/default/prometheus-node-exporter
+        content: |
+          ARGS="--web.listen-address=127.0.0.1:9100"
+        mode: "0644"
+      notify: Restart node exporter
+
     # deploy.yml restarts the spawner after copying its code.
     - name: Spawner unit
       ansible.builtin.copy:
@@ -310,4 +331,4 @@
       ansible.builtin.systemd:
         name: "{{ item }}"
         enabled: true
-      loop: [incus, handover-spawner]
+      loop: [incus, handover-spawner, prometheus-node-exporter]

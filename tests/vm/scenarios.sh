@@ -1,5 +1,5 @@
 #!/bin/bash
-# The six end-to-end scenarios; run through run.sh (which starts the spawner).
+# The seven end-to-end scenarios; run through run.sh (which starts the spawner).
 # Each line prints what happened next to what should happen.
 set -uo pipefail
 HERE=$(dirname "$(readlink -f "$0")")
@@ -47,4 +47,7 @@ echo "                  $got on image $(cat "base-p-${B:0:12}")       (want: sta
 #    levels (a real box always records level0 first) and B also resumed.
 rows=$("$PY" -c "import sqlite3; print(sqlite3.connect('lb.db').execute('select max_level, unranked from players').fetchall())")
 echo "6 leaderboard:    $rows   (want: every unranked = 1)"
+# 7. Metrics: the funnel counts levels reached, on the localhost-only port.
+m=$(curl -s http://127.0.0.1:9199/metrics)
+echo "7 metrics:        $(grep -c '^handover_level_reached_total' <<<"$m") levels, players $(grep '^handover_players ' <<<"$m" | cut -d' ' -f2), on play port: $(curl -s -o /dev/null -w '%{http_code}' "$U/metrics")   (want: >0 levels, players 3, 404)"
 echo "tracebacks:       $(grep -c Traceback spawner.log)                                  (want: 0)"
