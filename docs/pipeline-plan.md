@@ -10,7 +10,7 @@ is built or hand-edited on the host.
 |---|---|---|
 | Infra | OCI A1 instance (Terraform, `infra/`) | By hand. Local state on the laptop (serial 1, instance imported). |
 | Host config | Incus, `games` pool, `isolated` profile, fail2ban, sysctls, cloudflared, ttyd, rpcbind masked | By hand. `cloud-init.yaml` mirrors it but only runs at first boot, and it clones `bandit-wannabe` anonymously, which fails now that the repo is private. |
-| Spawner | `spawner/`, unit, tunnel config | **CD**: push to `master` → `deploy.yml`. |
+| Spawner | `spawner/`, unit, tunnel config | **CD**: push to `main` → `deploy.yml`. |
 | Game image | `handover` Incus image, 269 MiB, arm64 | CI builds + tests an *x86* copy and throws it away; the live arm64 image is built by hand on the host. `incus-image.sh build` publishes to the live alias **before** solve/leak tests run. |
 
 Passwords are generated at build time into `credentials/` (21 `*_pass` + 5
