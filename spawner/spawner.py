@@ -49,6 +49,8 @@ import sqlite3
 import time
 from aiohttp import web, ClientSession, WSMsgType, ClientTimeout, WSCloseCode
 
+import gamedata
+
 LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8080"))
 BASE_IMAGE  = os.environ.get("BASE_IMAGE", "handover")
@@ -243,6 +245,45 @@ def render_metrics() -> str:
 
 async def h_metrics(request):
     return web.Response(text=render_metrics(), content_type="text/plain")
+
+
+# ---------- player data for Grafana (metrics port only) ----------
+# The raw per-player view for the operator while the game runs: Grafana's
+# Infinity datasource reads these through the handover-metrics tunnel route,
+# which only the oke-prometheus Access token passes. Never on the play port.
+
+def _data(fn):
+    c = db()
+    try:
+        return fn(c)
+    finally:
+        c.close()
+
+
+async def h_data_players(request):
+    rows = await asyncio.to_thread(_data, lambda c: gamedata.Game(gamedata.load(c)).players())
+    return web.json_response(rows)
+
+
+async def h_data_levels(request):
+    rows = await asyncio.to_thread(_data, lambda c: gamedata.Game(gamedata.load(c)).levels())
+    return web.json_response(rows)
+
+
+async def h_data_player(request):
+    pid = request.query.get("pid", "")
+    if not PID_RE.fullmatch(pid):
+        return web.json_response([])
+    return web.json_response(await asyncio.to_thread(_data, lambda c: gamedata.timeline(c, pid)))
+
+
+def make_metrics_app():
+    mapp = web.Application()
+    mapp.router.add_get("/metrics", h_metrics)
+    mapp.router.add_get("/data/players", h_data_players)
+    mapp.router.add_get("/data/levels", h_data_levels)
+    mapp.router.add_get("/data/player", h_data_player)
+    return mapp
 
 
 def db():
@@ -1450,9 +1491,7 @@ async def on_start(app):
     save_state()
     app["reaper"] = asyncio.create_task(reaper(app))
     # Metrics on their own localhost-only port: play.barrypekerman.com can't reach them.
-    mapp = web.Application()
-    mapp.router.add_get("/metrics", h_metrics)
-    app["metrics_runner"] = web.AppRunner(mapp)
+    app["metrics_runner"] = web.AppRunner(make_metrics_app())
     await app["metrics_runner"].setup()
     await web.TCPSite(app["metrics_runner"], "127.0.0.1", METRICS_PORT).start()
 

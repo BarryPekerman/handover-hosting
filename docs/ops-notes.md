@@ -148,6 +148,14 @@ cookie; linked to the GitHub account for signed-in players). No IPs are kept.
 It all lands in the `events` table of `~/handover-leaderboard.db` (nightly
 backup). The promise: publish only totals and averages, then delete the raw data.
 
+While the game runs, the Grafana dashboard **The Handover — players** shows it
+per player: the spawner serves `/data/players`, `/data/levels` and
+`/data/player?pid=` (JSON) on the metrics port only, which the `handover-metrics`
+tunnel route exposes behind the `oke-prometheus` Access token; Grafana's
+Infinity datasource reads them with that token. The numbers come from
+`spawner/gamedata.py`, the same code `scripts/results.py` uses, so the live view
+and the published breakdown agree.
+
 When the game closes:
 
 1. `python3 scripts/results.py ~/handover-leaderboard.db > results.md` (on the
