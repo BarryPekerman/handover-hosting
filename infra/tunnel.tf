@@ -7,7 +7,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared" "handover" {
   name       = "handover-tf"
   config_src = "cloudflare"
   lifecycle {
-    prevent_destroy = true # deleting it takes the game and SSH offline
+    prevent_destroy = false # drill B (2026-10-19): restored after the rebuild
   }
 }
 
