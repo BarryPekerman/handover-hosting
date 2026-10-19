@@ -8,7 +8,7 @@ name: deploy
 #
 # Manual on purpose: starting it is the approval for a production deploy.
 #   gh workflow run deploy.yml -R BarryPekerman/handover-hosting
-# Pushes to master only run the checks in ci.yml.
+# Pushes to main only run the checks in ci.yml.
 on:
   workflow_dispatch:
   workflow_call:       # rebuild.yml runs it as one step of a rebuild
