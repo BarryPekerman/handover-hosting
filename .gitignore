@@ -48,6 +48,7 @@
 !infra/variables.tf
 !spawner/handover-spawner.service
 !scripts/results.py
+!spawner/gamedata.py
 !spawner/spawner.py
 !spawner/static/favicon.png
 !spawner/static/og.png
