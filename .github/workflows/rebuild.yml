@@ -64,7 +64,8 @@ jobs:
           [ -n "$run_id" ] || { echo "::error::no passing ci run on main"; exit 1; }
           echo "image from ci run $run_id"
           before=$(gh run list -R "$REPO" -w deploy-image.yml -L 1 --json databaseId -q '.[0].databaseId // 0')
-          gh workflow run deploy-image.yml -R "$REPO" -f run_id="$run_id"
+          # --ref avoids a default-branch lookup the narrow token can't do
+          gh workflow run deploy-image.yml -R "$REPO" --ref main -f run_id="$run_id"
           for _ in $(seq 30); do
             id=$(gh run list -R "$REPO" -w deploy-image.yml -L 1 --json databaseId -q '.[0].databaseId // 0')
             [ "$id" != "$before" ] && break
