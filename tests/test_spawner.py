@@ -230,3 +230,34 @@ def test_logged_errors_are_counted():
         sp.log.exception("provision failed")
     sp.log.warning("not an error")
     assert "handover_errors_total 2" in sp.render_metrics()
+
+
+def test_share_preview_and_icon_on_pages():
+    for page in (sp.LANDING, sp.STORY, sp.LEADERBOARD):
+        assert 'property=og:image content="https://play.barrypekerman.com/og.png"' in page
+        assert "twitter:card" in page
+    for page in (sp.SPAWNING, sp.APP):
+        assert "rel=icon" in page and "og:image" not in page
+
+
+def test_static_images_are_served():
+    from aiohttp.test_utils import TestClient, TestServer
+
+    async def go():
+        async with TestClient(TestServer(sp.make_app())) as c:
+            r = await c.get("/og.png")
+            assert r.status == 200 and r.headers["Content-Type"] == "image/png"
+            assert (await r.read())[:8] == b"\x89PNG\r\n\x1a\n"
+            assert (await c.get("/favicon.ico")).status == 200
+    # make_app's startup hooks touch Incus; serve the routes without them
+    orig = sp.make_app
+
+    def bare():
+        app = orig()
+        app.on_startup.clear(); app.on_shutdown.clear(); app.on_cleanup.clear()
+        return app
+    sp.make_app = bare
+    try:
+        asyncio.run(go())
+    finally:
+        sp.make_app = orig

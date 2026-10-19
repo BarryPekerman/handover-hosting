@@ -156,8 +156,10 @@ secret; readable copy: `~/handover-live-credentials.tgz` on the admin laptop).
 - **Restarting the spawner resets a live player's terminal** to a fresh login
   (ttyd is killed + respawned; the container survives via re-adopt). Brief blip,
   not data loss.
-- **Idle reaper = 60 min** (`IDLE_MIN`), max lifetime 1440 min. Idle containers
-  disappear; a returning player gets a fresh container (and can resume).
+- **Idle reaper = 15 min** (`IDLE_MIN`, was 60 until launch), max lifetime 1440 min.
+  Idle = no keystrokes. Idle containers disappear; a returning player gets a
+  fresh container and resumes from their save. Short so drive-by visitors (a
+  LinkedIn post) don't hold seats for an hour.
 - **After an image deploy** boxes on the old image are recycled once idle for
   5 min (`OUTDATED_IDLE_MIN`); active players move over on their next reload
   or Play, at the level they reached.

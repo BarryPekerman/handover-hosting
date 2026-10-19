@@ -15,7 +15,7 @@ TimeoutStopSec=15
 Environment=LISTEN_HOST=127.0.0.1
 Environment=LISTEN_PORT=8080
 Environment=MAX_PLAYERS=40
-Environment=IDLE_MIN=60
+Environment=IDLE_MIN=15
 Environment=MAX_LIFETIME_MIN=1440
 # Turnstile sitekey + secret come from Terraform via deploy.yml, in the env
 # file below (host-only); the leading '-' means "optional, don't fail if
