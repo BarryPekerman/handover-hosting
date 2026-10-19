@@ -59,6 +59,10 @@ everything after them is code.**
 3. `gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<latest passing ci on main>`.
 4. Restore the leaderboard from the newest `backup.yml` artifact (docs/ops-notes.md).
 
+Measured in the drill (2026-10-19, instance only): destroy 2m15s, create
+2m09s, tunnel up by itself 1m59s, deploy.yml 3m36s, deploy-image 59s — about
+**11 minutes of automation**, plus the time to start each workflow.
+
 `prevent_destroy` guards the instance, the tunnel, the `play` record and the
 security list. On free-tier A1 a true rebuild means terminating the old box
 first, which risks not getting the capacity back; do it knowingly.

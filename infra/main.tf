@@ -112,9 +112,7 @@ resource "oci_core_instance" "handover" {
   # live box. A newer base image or an edited cloud-init must NOT trigger a
   # replace of a running instance - rebuilds are a deliberate, manual act.
   lifecycle {
-    # Rebuild drill (2026-10-19): lifted for one targeted destroy; restored
-    # right after the rebuild.
-    prevent_destroy = false
+    prevent_destroy = true
     # The live box was hand-built (no user_data, slightly different key
     # formatting) and its image/boot details are provider-computed. Ignore the
     # whole metadata block + the image id so *adopting* the running instance is
