@@ -78,6 +78,9 @@ jobs:
   verify:
     needs: image
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read   # the Timing step reads this run's job durations
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
