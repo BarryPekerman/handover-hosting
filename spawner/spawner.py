@@ -97,6 +97,9 @@ live_ws: set = set()                     # open terminal WebSockets, closed on s
 resume_req: dict[str, tuple] = {}        # sid -> (saved {level: pass}, server-known level, note)
 live_image = ""                          # fingerprint BASE_IMAGE points at now
 background: set = set()                  # running provision tasks (asyncio keeps only weak refs)
+pids: dict[str, str] = {}                # sid -> player id (random; ties one player's boxes together)
+box_pid: dict[str, str] = {}             # container -> player id, for event rows (kept after teardown)
+PID_RE = re.compile(r"[0-9a-f]{32}")
 
 # ---------- metrics: Prometheus text format on a localhost-only port ----------
 # Scraped by the OKE Prometheus through the tunnel route handover-metrics (Access
@@ -134,6 +137,7 @@ def init_counters():
     zero += [("handover_teardowns_total", {"reason": r})
              for r in ("idle", "max-lifetime", "outdated-idle", "upgrade")]
     zero += [("handover_errors_total", {})]
+    zero += [("handover_wrong_passwords_total", {"level": i}) for i in range(WIN_INDEX)]
     for name, labels in zero:
         inc(name, 0, **labels)
 
@@ -186,11 +190,24 @@ def count_progress(s: dict, reaches: dict[int, int]):
     events(rows)
 
 
-def count_commands(s: dict, found: list[tuple[int, int, str]]):
-    """found: (epoch, level, command name) read from the box's journal."""
-    for _, lvl, cmd in found:
-        inc("handover_commands_total", level=lvl, cmd=cmd if cmd in TRACKED_CMDS else "other")
-    events([(t, s.get("ct", ""), "cmd", lvl, cmd) for t, lvl, cmd in found])
+def cmd_name(line: str) -> str:
+    """The command a line runs, for the bounded metrics label: first word, path stripped."""
+    word = line.split(maxsplit=1)[0] if line.strip() else ""
+    word = word.rsplit("/", 1)[-1]
+    return word if word in TRACKED_CMDS else "other"
+
+
+def count_commands(s: dict, found: list[tuple]):
+    """found: (epoch, level, kind, detail, status) read from the box's journal.
+    kind "cmd": detail is the command line as typed, status its exit code (None
+    from images that logged names only). kind "badpass": a wrong password for
+    the account in detail, counted against the level the player is on."""
+    for _, lvl, kind, detail, _ in found:
+        if kind == "cmd":
+            inc("handover_commands_total", level=lvl, cmd=cmd_name(detail))
+        else:
+            inc("handover_wrong_passwords_total", level=lvl)
+    events([(t, s.get("ct", ""), kind, lvl, detail, status) for t, lvl, kind, detail, status in found])
 
 
 def _labels(items) -> str:
@@ -244,16 +261,26 @@ def db():
     # no player identity. kind: start, resume, reach, finish, end, cmd.
     c.execute("CREATE TABLE IF NOT EXISTS events "
               "(ts INTEGER, box TEXT, kind TEXT, level INTEGER, detail TEXT)")
+    # pid = random player id (cookie; the same across resumes and, signed in,
+    # across devices). status = a command's exit code. Announced on the landing
+    # and story pages; published only as totals after the game closes.
+    have = {r[1] for r in c.execute("PRAGMA table_info(events)")}
+    for col, typ in (("pid", "TEXT"), ("status", "INTEGER")):
+        if col not in have:
+            c.execute(f"ALTER TABLE events ADD COLUMN {col} {typ}")
+    c.execute("CREATE TABLE IF NOT EXISTS player_ids (uid TEXT PRIMARY KEY, pid TEXT)")
     return c
 
 
 def events(rows: list[tuple]):
-    """Append (ts, box, kind, level, detail) rows; analytics never break play."""
+    """Append (ts, box, kind, level, detail[, status]) rows, tagged with the
+    box's player id; analytics never break play."""
     if not rows:
         return
+    rows = [(*r[:5], r[5] if len(r) > 5 else None, box_pid.get(r[1])) for r in rows]
     try:
         c = db()
-        c.executemany("INSERT INTO events(ts,box,kind,level,detail) VALUES(?,?,?,?,?)", rows)
+        c.executemany("INSERT INTO events(ts,box,kind,level,detail,status,pid) VALUES(?,?,?,?,?,?,?)", rows)
         c.commit()
         c.close()
     except Exception:
@@ -299,13 +326,17 @@ for idx in "${!first[@]}"; do echo "$idx ${first[$idx]}"; done
 # handover-cmd; journald stamps the sender's uid, which maps to the level.
 CMDS_SH = r'''
 getent passwd | awk -F: '$1 ~ /^(level[0-9]+|dave)$/ {print "U", $3, $1}'
-journalctl -q -o json SYSLOG_IDENTIFIER=handover-cmd ${CURSOR:+"--after-cursor=$CURSOR"} -n 2000
+journalctl -q -o json SYSLOG_IDENTIFIER=handover-cmd SYSLOG_IDENTIFIER=su SYSLOG_IDENTIFIER=sshd \
+  ${CURSOR:+"--after-cursor=$CURSOR"} -n 2000
 '''
-CMD_NAME = re.compile(r"^[A-Za-z0-9_.+-]{1,32}$")
+CMD_NAME = re.compile(r"^[A-Za-z0-9_.+-]{1,32}$")      # old images logged the name only
+CMD_LINE = re.compile(r"^(\d{1,3}) (.{1,200})$", re.S)  # "<exit status> <command line>"
+BAD_PASS = re.compile(r"authentication failure;.* user=(level\d+|dave)\b")
 
 
-def parse_commands(out: str) -> tuple[list[tuple[int, int, str]], str]:
-    """(epoch, level, name) per logged command, and the journal cursor to resume from."""
+def parse_commands(out: str) -> tuple[list[tuple], str]:
+    """(epoch, level, kind, detail, status) per command line or wrong password,
+    and the journal cursor to resume from."""
     uids, found, cursor = {}, [], ""
     for ln in out.splitlines():
         if ln.startswith("U "):
@@ -318,9 +349,21 @@ def parse_commands(out: str) -> tuple[list[tuple[int, int, str]], str]:
         except ValueError:
             continue
         cursor = e.get("__CURSOR", cursor)
-        name, uid = e.get("MESSAGE"), e.get("_UID")
-        if isinstance(name, str) and CMD_NAME.match(name) and uid in uids:
-            found.append((int(e.get("__REALTIME_TIMESTAMP", "0")) // 1_000_000, uids[uid], name))
+        msg, uid, ident = e.get("MESSAGE"), e.get("_UID"), e.get("SYSLOG_IDENTIFIER")
+        if not isinstance(msg, str):
+            continue
+        ts = int(e.get("__REALTIME_TIMESTAMP", "0")) // 1_000_000
+        if ident == "handover-cmd" and uid in uids:
+            m = CMD_LINE.match(msg)
+            if m:
+                found.append((ts, uids[uid], "cmd", m.group(2), int(m.group(1))))
+            elif CMD_NAME.match(msg):
+                found.append((ts, uids[uid], "cmd", msg, None))
+        elif ident in ("su", "sshd"):
+            m = BAD_PASS.search(msg)
+            if m:   # a wrong password for account N = stuck on level N-1
+                target = WIN_INDEX if m.group(1) == "dave" else int(m.group(1)[5:])
+                found.append((ts, max(target - 1, 0), "badpass", m.group(1), None))
     return found, cursor
 
 
@@ -542,6 +585,29 @@ def remember(sid: str, uid, display: str):
         who[sid] = {"uid": uid, "display": display}
 
 
+def player_id(request, uid) -> str:
+    """The player's random id: the account's (so devices agree), else this
+    browser's cookie, else a new one. Never derived from anything about them."""
+    if uid:
+        c = db()
+        row = c.execute("SELECT pid FROM player_ids WHERE uid=?", (str(uid),)).fetchone()
+        if not row:
+            pid = request.cookies.get("pid", "")
+            pid = pid if PID_RE.fullmatch(pid) else secrets.token_hex(16)
+            c.execute("INSERT INTO player_ids(uid, pid) VALUES(?,?)", (str(uid), pid))
+            c.commit()
+            row = (pid,)
+        c.close()
+        return row[0]
+    pid = request.cookies.get("pid", "")
+    return pid if PID_RE.fullmatch(pid) else secrets.token_hex(16)
+
+
+def with_pid(resp, pid: str):
+    resp.set_cookie("pid", pid, httponly=True, samesite="Lax", path="/", max_age=365 * 86400)
+    return resp
+
+
 def with_cookie(resp, sid: str):
     resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", path="/", max_age=MAX_LIFE)
     return resp
@@ -585,7 +651,8 @@ def save_state():
     try:
         data = {sid: {**{k: s[k] for k in ("ct", "port", "created", "last", "start", "image")},
                       "counted": s.get("counted", []), "cmd_cursor": s.get("cmd_cursor", ""),
-                      "who": who.get(sid, {"uid": None, "display": "anonymous"})}
+                      "who": who.get(sid, {"uid": None, "display": "anonymous"}),
+                      "pid": pids.get(sid, "")}
                 for sid, s in sessions.items()}
         tmp = STATE_FILE + ".tmp"
         with open(tmp, "w") as f:
@@ -673,6 +740,7 @@ async def provision(sid: str) -> dict | None:
         port = alloc_port()
         proc = await start_ttyd(sid, ct, port, login_user(start))
         now = time.time()
+        box_pid[ct] = pids.get(sid, "")
         sessions[sid] = {"ct": ct, "port": port, "proc": proc, "created": now, "last": now,
                          "start": start, "passes": {}, "drop": drop, "note": note,
                          "image": await container_image(ct)}
@@ -809,6 +877,7 @@ background:none;font-family:monospace;font-size:1.2rem;cursor:pointer}
 .play:hover{background:#33ff66;color:#000}
 p{max-width:34rem;line-height:1.5;padding:0 1rem}
 .cf-turnstile{margin-top:.3rem}
+.notice{margin-top:1.4rem;opacity:.55;font-size:.8rem}
 </style>__TS_SCRIPT__</head><body>
 <h1>THE HANDOVER</h1>
 <p class=hook>Dave won the lottery and left you his server.<br>Nothing is documented.</p>
@@ -819,6 +888,8 @@ __TS_WIDGET__</form>
 <p class=links><a href="/story">story &amp; how to play</a>
 &nbsp;&middot;&nbsp; <a href="/leaderboard">leaderboard</a></p>
 <p class=signin>__SIGNIN__</p>
+<p class=notice>Playing records your session (commands and timings) under a random ID,
+for a public breakdown when the game closes. <a href="/story#record">What we record</a></p>
 <script>__SAVE_JS__
 (function(){
   var lv=loadSave(),n=Math.max(topLevel(lv),__SRV__);
@@ -876,10 +947,14 @@ insides &middot; processes, signals and cron. 21 levels, four acts.</p>
 <p class=dim>Everyone gets the same passwords, so yes, you could look them up. It's your game
 to spoil. The leaderboard only counts runs that climb every level.</p>
 
-<h2>What we record</h2>
-<p class=dim>To see where people get stuck: when each level is reached, and the names of the
-commands used on it (<code>find</code>, <code>grep</code>&hellip; never what you type after
-them). Not tied to your GitHub account.</p>
+<h2 id=record>What we record</h2>
+<p class=dim>By playing, you agree that your session is recorded: the commands you type
+in the game (the whole line, and whether it worked), wrong passwords, and when you
+reach each level. It's stored under a random ID, not your name; no IP addresses are
+kept. If you sign in with GitHub, that ID is linked to your account (so your devices
+share it) and your handle appears on the leaderboard. When the game closes, the results are published as totals and averages
+(fastest, slowest, typical times, popular commands per level), and the raw records
+are deleted. Don't type anything private into the game.</p>
 
 <p style="margin-top:2rem;text-align:center"><a href="/">&larr; back to play</a></p>
 </main></body></html>"""
@@ -1098,6 +1173,8 @@ async def h_play(request):
     (so crawlers / prefetch / a one-line loop can't fill every seat)."""
     uid, disp = identity(request)
     sid = resolve_sid(request)
+    pid = pids.get(sid) if sid else None
+    pid = pid or player_id(request, uid)
     # returning visitor on a replaced image → new container at the level they
     # reached (known server-side). It replaces a seat, so no bot check/throttle.
     if sid and sid in sessions and outdated(sessions[sid]):
@@ -1108,15 +1185,16 @@ async def h_play(request):
         remember(sid, uid, disp)
         resume_req[sid] = ({}, lvl, "the server was updated - " +
                            (f"resumed you at level {lvl}" if lvl else "you're on the new version"))
+        pids[sid] = pid
         start_provision(sid)
-        return spinner(sid)
+        return with_pid(spinner(sid), pid)
     # returning visitor (this device or another one signed in to the same
     # account) whose box is alive or starting → straight in, no new spawn
     if sid and (sid in sessions or states.get(sid) == "pending"):
         remember(sid, uid, disp)
         if sid in sessions:
-            return with_cookie(web.HTTPFound(f"/app/{sid}"), sid)
-        return spinner(sid)
+            return with_pid(with_cookie(web.HTTPFound(f"/app/{sid}"), sid), pid)
+        return with_pid(spinner(sid), pid)
     ip = client_ip(request)
     form = await request.post()
     # bot check before we spend a container (no-op until the secret is configured)
@@ -1128,10 +1206,11 @@ async def h_play(request):
         return web.Response(text=SLOWDOWN, content_type="text/html", status=429)
     sid = sid or secrets.token_hex(16)
     who[sid] = {"uid": uid, "display": disp}
+    pids[sid] = pid
     if form.get("mode") == "resume":
         resume_req[sid] = (parse_save(form.get("save", "")), server_level(uid), "")
     start_provision(sid)
-    return spinner(sid)
+    return with_pid(spinner(sid), pid)
 
 
 async def h_play_get(request):
@@ -1357,6 +1436,8 @@ async def on_start(app):
         start = s.get("start", 0)
         if s.get("who"):
             who[sid] = s["who"]
+        if s.get("pid"):
+            pids[sid] = box_pid[s["ct"]] = s["pid"]
         proc = await start_ttyd(sid, s["ct"], s["port"], login_user(start))
         sessions[sid] = {"ct": s["ct"], "port": s["port"], "proc": proc,
                          "created": s.get("created", time.time()), "last": time.time(),

@@ -139,6 +139,23 @@ scp restore/handover-leaderboard.db handover:~/          # spawner stopped
 The live level passwords are not in it (they're the `HANDOVER_CREDENTIALS`
 secret; readable copy: `~/handover-live-credentials.tgz` on the admin laptop).
 
+## Gameplay data and closing the game
+
+Players are told on the landing and story pages that their session is recorded:
+every command line (capped at 200 characters) with its exit status, wrong
+passwords, and when each level is reached, under a random player id (`pid`
+cookie; linked to the GitHub account for signed-in players). No IPs are kept.
+It all lands in the `events` table of `~/handover-leaderboard.db` (nightly
+backup). The promise: publish only totals and averages, then delete the raw data.
+
+When the game closes:
+
+1. `python3 scripts/results.py ~/handover-leaderboard.db > results.md` (on the
+   host, or on a restored backup). It prints totals and averages only, with no
+   player ids or command lines, so it can be published as is.
+2. Delete the raw records: `sqlite3 ~/handover-leaderboard.db 'DELETE FROM events; DELETE FROM player_ids; VACUUM;'`,
+   and delete the backup artifacts in GitHub Actions (they expire after 30 days anyway).
+
 ## Known gotchas / non-bugs (seen this session)
 
 - **The btrfs quota counts the shared base image.** Incus sets the limit on a
