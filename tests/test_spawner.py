@@ -43,6 +43,8 @@ def setup_function():
     sp.live_image = ""
     sp.counters.clear()
     sp.solve_hist.clear()
+    sp.pids.clear()
+    sp.box_pid.clear()
 
 
 def box(sid, uid=None, **kw):
@@ -192,21 +194,55 @@ def test_long_breaks_stay_out_of_the_histogram_but_in_events():
 def test_commands_from_the_journal():
     out = "\n".join([
         "U 1001 level3", "U 1022 dave",
-        json.dumps({"__CURSOR": "c1", "_UID": "1001", "MESSAGE": "find", "__REALTIME_TIMESTAMP": "5000000"}),
-        json.dumps({"__CURSOR": "c2", "_UID": "1001", "MESSAGE": "rm -rf /"}),     # not a name
-        json.dumps({"__CURSOR": "c3", "_UID": "0", "MESSAGE": "ls"}),              # not a player
-        json.dumps({"__CURSOR": "c4", "_UID": "1022", "MESSAGE": "frobnicate", "__REALTIME_TIMESTAMP": "7000000"}),
+        json.dumps({"__CURSOR": "c1", "_UID": "1001", "SYSLOG_IDENTIFIER": "handover-cmd",
+                    "MESSAGE": "0 find / -perm -4000 2>/dev/null", "__REALTIME_TIMESTAMP": "5000000"}),
+        json.dumps({"__CURSOR": "c2", "_UID": "1001", "SYSLOG_IDENTIFIER": "handover-cmd",
+                    "MESSAGE": "find", "__REALTIME_TIMESTAMP": "6000000"}),          # old image: name only
+        json.dumps({"__CURSOR": "c3", "_UID": "0", "SYSLOG_IDENTIFIER": "handover-cmd",
+                    "MESSAGE": "0 ls"}),                                             # not a player
+        json.dumps({"__CURSOR": "c4", "_UID": "1022", "SYSLOG_IDENTIFIER": "handover-cmd",
+                    "MESSAGE": "127 frobnicate --x", "__REALTIME_TIMESTAMP": "7000000"}),
+        json.dumps({"__CURSOR": "c5", "_UID": "1001", "SYSLOG_IDENTIFIER": "su", "__REALTIME_TIMESTAMP": "8000000",
+                    "MESSAGE": "pam_unix(su:auth): authentication failure; logname= uid=1001 euid=0 "
+                               "tty=/dev/pts/1 ruser=level3 rhost=  user=level4"}),
+        json.dumps({"__CURSOR": "c6", "_UID": "0", "SYSLOG_IDENTIFIER": "sshd", "__REALTIME_TIMESTAMP": "9000000",
+                    "MESSAGE": "Failed password for level4 from ::1 port 1 ssh2"}),  # same attempt: pam line counts
         "garbage",
     ])
     found, cursor = sp.parse_commands(out)
-    assert found == [(5, 3, "find"), (7, sp.WIN_INDEX, "frobnicate")]
-    assert cursor == "c4"
+    assert found == [(5, 3, "cmd", "find / -perm -4000 2>/dev/null", 0), (6, 3, "cmd", "find", None),
+                     (7, sp.WIN_INDEX, "cmd", "frobnicate --x", 127), (8, 3, "badpass", "level4", None)]
+    assert cursor == "c6"
     box("s1", ct="p-1")
+    sp.box_pid["p-1"] = "a" * 32
     sp.count_commands(sp.sessions["s1"], found)
-    assert 'handover_commands_total{cmd="find",level="3"} 1' in sp.render_metrics()
-    assert 'handover_commands_total{cmd="other",level="21"} 1' in sp.render_metrics()
-    kinds = sqlite3.connect(sp.DB_PATH).execute("SELECT kind, detail FROM events").fetchall()
-    assert kinds == [("cmd", "find"), ("cmd", "frobnicate")]
+    text = sp.render_metrics()
+    assert 'handover_commands_total{cmd="find",level="3"} 2' in text
+    assert 'handover_commands_total{cmd="other",level="21"} 1' in text
+    assert 'handover_wrong_passwords_total{level="3"} 1' in text
+    rows = sqlite3.connect(sp.DB_PATH).execute("SELECT kind, detail, status, pid FROM events").fetchall()
+    assert rows[0] == ("cmd", "find / -perm -4000 2>/dev/null", 0, "a" * 32)
+    assert rows[-1] == ("badpass", "level4", None, "a" * 32)
+
+
+def test_player_id_follows_cookie_then_account():
+    r = Req()
+    r.cookies["pid"] = "b" * 32
+    assert sp.player_id(r, None) == "b" * 32                    # same browser, same player
+    r.cookies["pid"] = "not-a-pid"
+    assert sp.PID_RE.fullmatch(sp.player_id(r, None))          # junk cookie: a fresh id
+    r.cookies["pid"] = "c" * 32
+    assert sp.player_id(r, "42") == "c" * 32                    # first sign-in adopts this browser's id
+    r2 = Req()
+    r2.cookies["pid"] = "d" * 32
+    assert sp.player_id(r2, "42") == "c" * 32                   # another device gets the account's id
+
+
+def test_cmd_name_for_metrics():
+    assert sp.cmd_name("find / -name x") == "find"
+    assert sp.cmd_name("/usr/bin/grep -r x") == "grep"
+    assert sp.cmd_name("./run.sh") == "other"
+    assert sp.cmd_name("") == "other"
 
 
 def test_quiet_game_reads_zero_not_missing():
