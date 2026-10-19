@@ -110,7 +110,8 @@ METRICS_PORT = int(os.environ.get("METRICS_PORT", "9101"))
 SOLVE_BUCKETS = (60, 180, 300, 600, 1200, 1800, 3600, 7200, 14400)  # seconds
 SOLVE_CAP = 14400        # longer is a player who walked away: kept in events, not in the histogram
 # Commands counted by name in the metrics; anything else is "other" (the
-# events table keeps every name). Bounded so a player can't explode the series.
+# events table keeps every line). Bounded so a player can't explode the series;
+# shell aliases like ll count by their own name.
 TRACKED_CMDS = frozenset("""
     ls cd cat less more head tail grep find file strings xxd od hexdump base64
     openssl gpg tar gzip zcat unzip bzip2 xz diff sort uniq wc cut tr awk sed
@@ -118,6 +119,11 @@ TRACKED_CMDS = frozenset("""
     stat ps top kill pkill pgrep systemctl journalctl crontab at env export
     echo printf history clear exit git python3 curl wget nc ss lsof sqlite3 jq
     tmux tree pwd cp mv rm mkdir touch ln readlink which type alias help
+    ll la l dir egrep fgrep nl rev tac xargs tee watch sleep date hostname
+    du df free uptime w who last lastlog getent locate apropos whatis info
+    netstat ip ping nmap telnet scp sftp openssl sha256sum md5sum stat
+    chown chgrp umask unset set source exec fg bg jobs nohup timeout
+    systemd-run sudoedit visudo journalctl dmesg lsblk mount findmnt
 """.split())
 counters: dict[tuple, float] = {}        # (name, sorted label items) -> value
 solve_hist: dict[int, list] = {}         # level -> per-bucket counts + [+Inf count, sum]
