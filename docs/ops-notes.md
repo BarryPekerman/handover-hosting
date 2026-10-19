@@ -33,7 +33,9 @@ top. Not player-facing.
   (`p-<sid12>`) + its own loopback **ttyd**, reverse-proxied at `/t/<sid>/`.
 - **Per-player container:** clone of the golden image `handover` on the
   `isolated` profile — no NIC, `security.guestapi=false`, CPU 50% / mem 512 MiB
-  / procs 300, **2 GiB btrfs disk quota** (pool `games`, 30 GiB loop ceiling).
+  / procs 300, **512 MiB btrfs disk quota** (pool `games`, 30 GiB loop ceiling),
+  own uid range per box (`security.idmap.isolated`). Up to **40 players**
+  (`MAX_PLAYERS`); measured idle box: 1.4% of a core, 138 MiB RAM, 46 MiB disk.
 - **Code:** hosting (spawner, cloudflared, infra/terraform, this doc) lives in
   **`handover-hosting`**; the game itself lives in **`bandit-wannabe`**, whose CI
   builds the arm64 `handover` image and whose `deploy-image` workflow ships it.
@@ -155,9 +157,9 @@ secret; readable copy: `~/handover-live-credentials.tgz` on the admin laptop).
 ## Hardening posture (break-tested)
 
 Strong: unprivileged containers, no network device (no egress, no cloud
-metadata), guest API off, fork-bomb/mem-bomb contained by cgroup limits, 2 GiB
+metadata), guest API off, fork-bomb/mem-bomb contained by cgroup limits, 512 MiB
 disk quota caps fill, 30 GiB pool is the host ceiling. Spawning gated by
-Cloudflare Turnstile + per-IP rate limit (5/10 min) + hard 20-seat cap.
+Cloudflare Turnstile + per-IP rate limit (5/10 min) + hard 40-seat cap.
 No inbound ports at all: SSH only through the tunnel behind Cloudflare Access,
 key-only. (fail2ban still runs but sees only tunnel traffic from localhost,
 which it ignores.)

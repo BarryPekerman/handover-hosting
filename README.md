@@ -14,16 +14,16 @@ run: `ansible-playbook -i <host>, -u ubuntu --private-key <key> host/site.yml --
 
 - Incus (`incus admin init --minimal`), `ubuntu` in `incus-admin`.
 - `ttyd` (>=1.7, past the old CVE), `python3-aiohttp`, `fail2ban`, rpcbind masked,
-  `fs.inotify.max_user_instances=1024`.
+  `fs.inotify.max_user_instances=8192`.
 - A `games` btrfs pool (per-container disk quota; CoW-shares the base image):
   `incus storage create games btrfs size=30GiB`
 - The `isolated` profile: no NIC, per-player caps, guest API off.
   ```
   incus profile create isolated
-  incus profile device add isolated root disk pool=games path=/ size=2GiB
+  incus profile device add isolated root disk pool=games path=/ size=512MiB
   incus profile device add isolated eth0 none
   incus profile set isolated limits.cpu.allowance=50% limits.memory=512MiB limits.processes=300
-  incus profile set isolated security.guestapi=false
+  incus profile set isolated security.guestapi=false security.idmap.isolated=true
   ```
 - The game image as alias `handover`. It is **not built here**: `bandit-wannabe`'s
   CI builds and tests it, and its `deploy-image` workflow imports it and moves
