@@ -103,7 +103,7 @@ fail2ban-client status sshd
 ```
 
 Deploying spawner changes: `gh workflow run deploy.yml` (manual = the approval;
-pushes to `master` only run `ci.yml`). `.github/workflows/deploy.yml`
+pushes to `main` only run `ci.yml`). `.github/workflows/deploy.yml`
 applies `host/site.yml` (with the tunnel's run token from `CF_TUNNEL_TOKEN`),
 copies `spawner/`, writes the secrets env file from GitHub Secrets and restarts
 the spawner. Don't scp by

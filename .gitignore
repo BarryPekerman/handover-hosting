@@ -1,23 +1,54 @@
-# Python
-__pycache__/
-*.pyc
-# Runtime state / anything secret (never commit tunnel creds or session state)
-*.json
-.handover-sessions.json
-cert.pem
-*credentials*
+# Allow-list: ignore everything, then unignore exactly what may be committed.
+# Adding a file? Add its !path line here too ("nothing to commit" = missing line).
+*
 
-# host-only secrets (Turnstile, etc.) - never commit
-*.env
-handover-spawner.env
+# Unignore directories (needed to traverse into them)
+!.github/
+!.github/actions/
+!.github/actions/tunnel-ssh/
+!.github/workflows/
+!docs/
+!host/
+!host/deploy-keys/
+!infra/
+!spawner/
+!tests/
+!tests/vm/
+!tests/vm/bin/
 
-# Terraform
-infra/.terraform/
-infra/.terraform.lock.hcl
-*.tfstate
-*.tfstate.*
-infra/terraform.tfvars
-
-# leaderboard sqlite (runtime state)
-*.db
-handover-leaderboard.db
+# Unignore specific files
+!.github/actions/tunnel-ssh/action.yml
+!.github/workflows/backup.yml
+!.github/workflows/ci.yml
+!.github/workflows/deploy.yml
+!.github/workflows/rebuild.yml
+!.github/workflows/terraform.yml
+!.gitignore
+!README.md
+!docs/hardening-plan.md
+!docs/ops-notes.md
+!docs/pipeline-plan.md
+!host/deploy-keys/bandit-wannabe.pub
+!host/deploy-keys/handover-hosting.pub
+!host/site.yml
+!infra/README.md
+!infra/cloud-init.yaml.tftpl
+!infra/cloudflare.tf
+!infra/github.tf
+!infra/grafana.tf
+!infra/hostkey.tf
+!infra/main.tf
+!infra/metrics.tf
+!infra/network.tf
+!infra/terraform.tfvars.example
+!infra/tunnel.tf
+!infra/variables.tf
+!spawner/handover-spawner.service
+!spawner/spawner.py
+!tests/README.md
+!tests/test_spawner.py
+!tests/vm/bin/incus
+!tests/vm/run.sh
+!tests/vm/scenarios.sh
+!tests/vm/smoke-box.sh
+!tests/vm/twodev.py
