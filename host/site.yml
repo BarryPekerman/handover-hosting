@@ -29,9 +29,12 @@
         security.idmap.isolated: "true"
       devices:
         eth0: { type: none }        # no NIC: isolation by absence
-        # ~50 MiB used per player in practice (btrfs shares the image); 40 x 512
-        # MiB fits the 30 GiB pool, so a full house of full quotas cannot fill it.
-        root: { path: /, pool: games, size: 512MiB, type: disk }
+        # btrfs enforces this on what the box *references*, which includes the
+        # ~0.95 GiB base image it shares with every box. So the size is base +
+        # the player's room: 1.5 GiB leaves ~560 MiB writable (measured). On
+        # disk a box only adds its own writes (~50 MiB typical), so 40 x 560
+        # MiB worst case + one base image fits the 30 GiB pool.
+        root: { path: /, pool: games, size: 1536MiB, type: disk }
 
   handlers:
     - name: Apply sysctls

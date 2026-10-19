@@ -33,7 +33,8 @@ top. Not player-facing.
   (`p-<sid12>`) + its own loopback **ttyd**, reverse-proxied at `/t/<sid>/`.
 - **Per-player container:** clone of the golden image `handover` on the
   `isolated` profile — no NIC, `security.guestapi=false`, CPU 50% / mem 512 MiB
-  / procs 300, **512 MiB btrfs disk quota** (pool `games`, 30 GiB loop ceiling),
+  / procs 300, **1.5 GiB btrfs disk quota** (counts the shared ~0.95 GiB base
+  image, so ~560 MiB writable; pool `games`, 30 GiB loop ceiling),
   own uid range per box (`security.idmap.isolated`). Up to **40 players**
   (`MAX_PLAYERS`); measured idle box: 1.4% of a core, 138 MiB RAM, 46 MiB disk.
 - **Code:** hosting (spawner, cloudflared, infra/terraform, this doc) lives in
@@ -128,6 +129,14 @@ secret; readable copy: `~/handover-live-credentials.tgz` on the admin laptop).
 
 ## Known gotchas / non-bugs (seen this session)
 
+- **The btrfs quota counts the shared base image.** Incus sets the limit on a
+  box's *referenced* data (~0.95 GiB of image + its own writes), not on what
+  it adds to the pool. A quota at or below the image size makes boxes fail to
+  start (2026-10-19: 512 MiB did; fixed to 1.5 GiB). Measure with
+  `sudo btrfs qgroup show -reF /var/lib/incus/storage-pools/games/containers/<box>`.
+- **Players can't write files over 10 MiB** (`fsize` limit, security role) —
+  by design; "File size limit exceeded" is that, not the disk quota.
+
 - **"I dropped into level10":** was a misread of `level0@<hostname>`. Prompt now
   shows `level0@handover` (fixed hostname) to kill the ambiguity. Accounts are
   un-padded: `level0, level1, … level10, … level20` (no `level01`); they sort
@@ -157,7 +166,7 @@ secret; readable copy: `~/handover-live-credentials.tgz` on the admin laptop).
 ## Hardening posture (break-tested)
 
 Strong: unprivileged containers, no network device (no egress, no cloud
-metadata), guest API off, fork-bomb/mem-bomb contained by cgroup limits, 512 MiB
+metadata), guest API off, fork-bomb/mem-bomb contained by cgroup limits, a 1.5 GiB
 disk quota caps fill, 30 GiB pool is the host ceiling. Spawning gated by
 Cloudflare Turnstile + per-IP rate limit (5/10 min) + hard 40-seat cap.
 No inbound ports at all: SSH only through the tunnel behind Cloudflare Access,
