@@ -92,23 +92,41 @@ jobs:
       GH_TOKEN: ${{ secrets.REBUILD_GH_TOKEN }}   # Actions read/write on bandit-wannabe only
       REPO: BarryPekerman/bandit-wannabe
     steps:
+      # The newest passing build of main whose image artifact still exists
+      # (artifacts expire); none -> build one now and wait for its tests.
       - name: Ship bandit-wannabe's latest tested image
         run: |
-          run_id=$(gh run list -R "$REPO" -w ci.yml -b main -L 20 --json databaseId,conclusion,event \
-            -q '[.[] | select(.conclusion == "success" and .event == "push")][0].databaseId')
-          [ -n "$run_id" ] || { echo "::error::no passing ci run on main"; exit 1; }
+          newest_with_image() {
+            for id in $(gh run list -R "$REPO" -w ci.yml -b main -L 30 --json databaseId,conclusion,event \
+                -q '.[] | select(.conclusion == "success" and .event != "pull_request") | .databaseId'); do
+              if [ "$(gh api "repos/$REPO/actions/runs/$id/artifacts" \
+                    -q '[.artifacts[] | select(.name == "handover-image" and (.expired | not))] | length')" -gt 0 ]; then
+                echo "$id"; return
+              fi
+            done
+          }
+          start_and_wait() {   # <workflow> [-f k=v...]: dispatch on main, wait, print the run id
+            local wf=$1; shift
+            local before id
+            before=$(gh run list -R "$REPO" -w "$wf" -L 1 --json databaseId -q '.[0].databaseId // 0')
+            gh workflow run "$wf" -R "$REPO" --ref main "$@" >&2   # --ref: the token can't look up the default branch
+            for _ in $(seq 30); do
+              id=$(gh run list -R "$REPO" -w "$wf" -L 1 --json databaseId -q '.[0].databaseId // 0')
+              [ "$id" != "$before" ] && break
+              sleep 4
+            done
+            [ "$id" != "$before" ] || { echo "::error::$wf didn't start" >&2; exit 1; }
+            echo "$wf: https://github.com/$REPO/actions/runs/$id" >&2
+            gh run watch "$id" -R "$REPO" --exit-status >&2
+            echo "$id"
+          }
+          run_id=$(newest_with_image)
+          if [ -z "$run_id" ]; then
+            echo "no unexpired tested image on main: building one (tests included)"
+            run_id=$(start_and_wait ci.yml)
+          fi
           echo "image from ci run $run_id"
-          before=$(gh run list -R "$REPO" -w deploy-image.yml -L 1 --json databaseId -q '.[0].databaseId // 0')
-          # --ref avoids a default-branch lookup the narrow token can't do
-          gh workflow run deploy-image.yml -R "$REPO" --ref main -f run_id="$run_id"
-          for _ in $(seq 30); do
-            id=$(gh run list -R "$REPO" -w deploy-image.yml -L 1 --json databaseId -q '.[0].databaseId // 0')
-            [ "$id" != "$before" ] && break
-            sleep 4
-          done
-          [ "$id" != "$before" ] || { echo "::error::deploy-image didn't start"; exit 1; }
-          echo "deploy-image: https://github.com/$REPO/actions/runs/$id"
-          gh run watch "$id" -R "$REPO" --exit-status
+          start_and_wait deploy-image.yml -f run_id="$run_id" >/dev/null
 
   verify:
     needs: image
