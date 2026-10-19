@@ -27,7 +27,7 @@ resource "cloudflare_dns_record" "play" {
     ipv6_only     = false
   }
   lifecycle {
-    prevent_destroy = false # drill B (2026-10-19): restored after the rebuild
+    prevent_destroy = true
   }
 }
 
