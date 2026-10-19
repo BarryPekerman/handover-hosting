@@ -53,7 +53,7 @@ under `/t/<sid>/`.
 - **Restarts are non-destructive:** live containers are re-adopted.
 
 Routes: `/` landing · `POST /play` find-or-create · `/ready` · `/app/<sid>`
-terminal page · `/t/<sid>/*` ttyd proxy · `/save/<sid>` · `/leaderboard` ·
+terminal page · `/t/<sid>/*` ttyd proxy · `/save/<sid>` · `/leaderboard` · `/story` ·
 `/login` `/auth/callback` `/logout` · `/healthz`.
 
 Config is env (see `handover-spawner.service` and the docstring at the top of

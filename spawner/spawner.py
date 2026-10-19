@@ -12,6 +12,7 @@ Routes:
   ANY  /t/<sid>/*        reverse-proxy (HTTP + WebSocket) to that box's ttyd
   GET  /save/<sid>       passwords of the levels reached, for the browser's save
   GET  /leaderboard      finishers by summed solve time
+  GET  /story            the premise and how to play (kept off the front page)
   GET  /login /auth/callback /logout   optional GitHub sign-in
   GET  /healthz          {"players": N, "max": M}
 
@@ -581,22 +582,26 @@ LANDING = """<!doctype html><html><head><meta charset=utf-8>
 :root{color-scheme:dark}
 body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;
 justify-content:center;background:#000;color:#33ff66;font-family:monospace;text-align:center}
-.play{margin-top:2rem;padding:.8rem 2.2rem;border:1px solid #33ff66;color:#33ff66;
+/* one vertical rhythm: title -> hook small, hook -> buttons -> links equal */
+h1{margin:0 0 1rem}p{margin:0}a{color:#33ff66}
+.hook{font-size:1.05rem;line-height:1.65;text-wrap:balance}
+form{display:flex;flex-direction:column;align-items:center;gap:.7rem;margin-top:2rem}
+.links{margin-top:2rem;opacity:.8}.signin{margin-top:.9rem;opacity:.8;font-size:.9rem}
+.play{margin:0;padding:.8rem 2.2rem;border:1px solid #33ff66;color:#33ff66;
 background:none;font-family:monospace;font-size:1.2rem;cursor:pointer}
 .play:hover{background:#33ff66;color:#000}
 p{max-width:34rem;line-height:1.5;padding:0 1rem}
-.cf-turnstile{margin:1.4rem auto 0}
+.cf-turnstile{margin-top:.3rem}
 </style>__TS_SCRIPT__</head><body>
 <h1>THE HANDOVER</h1>
-<p>Dave quit &mdash; won the lottery &mdash; and left you his server. He left mail, too.
-A browser terminal is all you need. Type <code>mail</code> to start.</p>
-<p style="opacity:.75;font-size:.95rem">Your progress saves in this browser as you play. If your
-session resets, come back here and resume.</p>
-<form method="post" action="/play">__TS_WIDGET__<input type=hidden name=save id=save><br>
-<button class=play type=submit name=mode value=resume id=resume hidden></button><br>
-<button class=play type=submit name=mode value=fresh id=fresh>&gt; play</button></form>
-<p style="margin-top:1.5rem"><a href="/leaderboard" style="color:#33ff66;opacity:.8">leaderboard &rarr;</a></p>
-<p style="opacity:.8;font-size:.9rem">__SIGNIN__</p>
+<p class=hook>Dave won the lottery and left you his server.<br>Nothing is documented.</p>
+<form method="post" action="/play"><input type=hidden name=save id=save>
+<button class=play type=submit name=mode value=resume id=resume hidden></button>
+<button class=play type=submit name=mode value=fresh id=fresh>&gt; play</button>
+__TS_WIDGET__</form>
+<p class=links><a href="/story">story &amp; how to play</a>
+&nbsp;&middot;&nbsp; <a href="/leaderboard">leaderboard</a></p>
+<p class=signin>__SIGNIN__</p>
 <script>__SAVE_JS__
 (function(){
   var lv=loadSave(),n=Math.max(topLevel(lv),__SRV__);
@@ -608,6 +613,55 @@ session resets, come back here and resume.</p>
 })();
 </script>
 </body></html>"""
+
+# The premise lives here rather than on the front page; Dave's own voice is
+# kept for his first mail in the game (bandit-wannabe VOICE.md).
+STORY = """<!doctype html><html><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>The Handover - story</title><style>
+:root{color-scheme:dark}
+body{margin:0;min-height:100vh;background:#000;color:#33ff66;font-family:monospace;
+display:flex;flex-direction:column;align-items:center;padding:2rem 1rem}
+main{max-width:36rem;line-height:1.55}h1{margin:.2rem 0;text-align:center}
+h2{font-size:1rem;margin:2rem 0 .4rem;border-bottom:1px solid #0a3;padding-bottom:.2rem}
+a{color:#33ff66}code{background:#021;padding:0 .25rem}ul{padding-left:1.2rem}li{margin:.3rem 0}
+.dim{opacity:.75}em{font-style:italic}
+</style></head><body><main>
+<h1>THE HANDOVER</h1>
+
+<h2>The story</h2>
+<p>Congratulations &mdash; you're the DevOps team.</p>
+<p>Nobody quite put it that way when they hired you. They talked about the product, the
+roadmap, the funding round. Your laptop arrived before your contract did. The servers came
+up once, in passing: <em>"Dave handles that."</em></p>
+<p>Dave won the lottery last week. The actual lottery. You've got his server, his logins,
+and a pile of notes he wrote on the way to the airport.</p>
+<p>Somewhere on that box is his admin password. Find it, and everything he built is yours.</p>
+
+<h2>How it works</h2>
+<ul>
+<li>Press play and you get your own Linux box in the browser. Nothing to install, nobody
+else on it.</li>
+<li><code>mail</code> reads Dave's note. Each level's puzzle hides the next account's
+password; <code>go 3</code> logs you into level 3.</li>
+<li>Your progress saves in this browser &mdash; if your session resets, come back and resume.
+Sign in with GitHub to keep the same box on every device and to appear on the
+leaderboard.</li>
+<li>Stuck? Re-read the note; <code>man</code> is there. The box has no internet &mdash;
+everything you need is already on it.</li>
+</ul>
+
+<h2>What you'll touch</h2>
+<p class=dim>No spoilers: files and filesystems &middot; permissions and sudo &middot; git's
+insides &middot; processes, signals and cron. 21 levels, four acts.</p>
+
+<h2>Fair play</h2>
+<p class=dim>Everyone gets the same passwords, so yes, you could look them up. It's your game
+to spoil. The leaderboard only counts runs that climb every level.</p>
+
+<p style="margin-top:2rem;text-align:center"><a href="/">&larr; back to play</a></p>
+</main></body></html>"""
+
 
 def message_page(title: str, heading: str, body: str, color: str) -> str:
     """A one-message page (slow down, failed bot check)."""
@@ -771,7 +825,7 @@ async def h_landing(request):
                   '<a href="/logout" style="color:#33ff66">log out</a>')
     elif oauth_ready():
         signin = ('<a href="/login" style="color:#33ff66">sign in with GitHub</a>'
-                  ' &mdash; save progress &amp; join the leaderboard across sessions')
+                  ' &mdash; same box on every device, and the leaderboard')
     else:
         signin = ""
     sid = resolve_sid(request)
@@ -977,6 +1031,10 @@ def fmt_dur(sec: int) -> str:
     return f"{sec // 3600}:{(sec % 3600) // 60:02d}:{sec % 60:02d}"
 
 
+async def h_story(request):
+    return web.Response(text=STORY, content_type="text/html")
+
+
 async def h_leaderboard(request):
     rows = []
     try:
@@ -1111,6 +1169,7 @@ def make_app():
         web.get("/app/{sid}", h_app),
         web.get("/save/{sid}", h_save),
         web.get("/leaderboard", h_leaderboard),
+        web.get("/story", h_story),
         web.get("/login", h_login),
         web.get("/auth/callback", h_callback),
         web.get("/logout", h_logout),
