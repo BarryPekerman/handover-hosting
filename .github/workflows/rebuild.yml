@@ -139,5 +139,5 @@ jobs:
           {
             echo "### Rebuild timing"
             gh run view "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" --json jobs \
-              -q '.jobs[] | select(.completedAt != null and .startedAt != null) | "- \(.name): \((((.completedAt | fromdate) - (.startedAt | fromdate)) / 60 | floor))m \((((.completedAt | fromdate) - (.startedAt | fromdate)) % 60))s"'
+              -q '.jobs[] | select(.status == "completed") | "- \(.name): \((((.completedAt | fromdate) - (.startedAt | fromdate)) / 60 | floor))m \((((.completedAt | fromdate) - (.startedAt | fromdate)) % 60))s"'
           } >> "$GITHUB_STEP_SUMMARY"
