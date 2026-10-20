@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import sys
+from contextlib import closing
 
 import pytest
 from aiohttp.test_utils import make_mocked_request
@@ -16,6 +17,12 @@ import common  # noqa: E402
 import metrics  # noqa: E402
 
 WIN = common.WIN_INDEX
+
+
+def query(sql):
+    """Rows from the test database, connection closed."""
+    with closing(sqlite3.connect(common.DB_PATH)) as c:
+        return c.execute(sql).fetchall()
 
 
 @pytest.fixture(autouse=True)
@@ -38,8 +45,7 @@ def test_a_full_run_from_level_0_finishes_ranked():
     s = {"ct": "p-1", "start": 0}
     metrics.count_progress(s, all_levels())
     assert counter("handover_finishes_total", ranked="true") == 1
-    rows = sqlite3.connect(common.DB_PATH).execute(
-        "SELECT kind, level, detail FROM events WHERE kind='finish'").fetchall()
+    rows = query("SELECT kind, level, detail FROM events WHERE kind='finish'")
     assert rows == [("finish", WIN, "ranked")]
 
 
@@ -81,8 +87,7 @@ def test_a_broken_database_never_breaks_play():
 def test_events_carry_the_boxs_player_id_and_status():
     common.box_pid["p-1"] = "f" * 32
     common.events([(1, "p-1", "cmd", 2, "ls", 0), (2, "p-9", "reach", 3, "")])
-    rows = sqlite3.connect(common.DB_PATH).execute(
-        "SELECT box, kind, status, pid FROM events ORDER BY ts").fetchall()
+    rows = query("SELECT box, kind, status, pid FROM events ORDER BY ts")
     assert rows == [("p-1", "cmd", 0, "f" * 32), ("p-9", "reach", None, None)]
 
 
@@ -92,6 +97,7 @@ def test_player_endpoint_serves_only_well_formed_ids():
     c.execute("INSERT INTO events(ts, box, kind, level, detail, pid) VALUES(2, 'p-2', 'reach', 0, '', ?)",
               ("c" * 32,))
     c.commit()
+    c.close()
 
     def get(pid):
         r = asyncio.run(metrics.h_data_player(make_mocked_request("GET", f"/data/player?pid={pid}")))

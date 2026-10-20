@@ -24,6 +24,7 @@ def test_results_breakdown(tmp_path):
         (9, "p-9", "cmd", 0, "ls", None, 0),                             # no player id: ignored
     ])
     c.commit()
+    c.close()
     out = subprocess.run([sys.executable, SCRIPT, str(db)], capture_output=True, text=True, check=True).stdout
     assert "- Players: 2" in out
     assert "| 1 | 2 | 0 |" in out                       # both reached level 1, none lost

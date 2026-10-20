@@ -38,6 +38,7 @@ Config via env (all optional; secrets come from the EnvironmentFile):
   secrets: TURNSTILE_SECRET, GH_CLIENT_SECRET, SESSION_SECRET (cookie signing)
 """
 import asyncio
+from contextlib import closing
 import contextlib
 import hmac
 import html
@@ -54,7 +55,7 @@ from common import (
     BASE_IMAGE, IDLE_SEC, LAUNCH_LOCK, LISTEN_HOST, LISTEN_PORT, LOGIN_USER, MAX_LIFE, MAX_PLAYERS,
     MAX_RESUME, OUTDATED_IDLE, PASS_RE, PORT_BASE, PROFILE, PUBLIC_URL, STATE_FILE,
     WIN_INDEX, background, box_pid, db, events, live_ws, locks, log, pids, player_row,
-    resume_req, sessions, states, who,
+    redirect, resume_req, sessions, states, who,
 )
 from metrics import (
     METRICS_PORT, count_commands, count_progress, inc, init_counters, make_metrics_app,
@@ -225,16 +226,15 @@ def skipped_levels(reaches: dict[int, int], prev_max: int, new_max: int) -> bool
 def save_progress(key: str, display: str, max_level: int, accum: int,
                   finished: int, unranked: int):
     try:
-        c = db()
-        c.execute("INSERT INTO players(key,display,max_level,accumulated,finished,updated,unranked) "
-                  "VALUES(?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
-                  "display=excluded.display, max_level=excluded.max_level, "
-                  "accumulated=excluded.accumulated, finished=excluded.finished, "
-                  "updated=excluded.updated, "
-                  "unranked=MAX(COALESCE(players.unranked,0), excluded.unranked)",
-                  (key, display, max_level, accum, finished, time.time(), unranked))
-        c.commit()
-        c.close()
+        with closing(db()) as c:
+            c.execute("INSERT INTO players(key,display,max_level,accumulated,finished,updated,unranked) "
+                      "VALUES(?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
+                      "display=excluded.display, max_level=excluded.max_level, "
+                      "accumulated=excluded.accumulated, finished=excluded.finished, "
+                      "updated=excluded.updated, "
+                      "unranked=MAX(COALESCE(players.unranked,0), excluded.unranked)",
+                      (key, display, max_level, accum, finished, time.time(), unranked))
+            c.commit()
     except Exception:
         log.exception("leaderboard write failed")
 
@@ -632,7 +632,7 @@ async def h_play(request):
     if sid and (sid in sessions or states.get(sid) == "pending"):
         remember(sid, uid, disp)
         if sid in sessions:
-            return with_pid(with_cookie(web.HTTPFound(f"/app/{sid}"), sid), pid)
+            return with_pid(with_cookie(redirect(f"/app/{sid}"), sid), pid)
         return with_pid(spinner(sid), pid)
     ip = client_ip(request)
     form = await request.post()
@@ -657,8 +657,8 @@ async def h_play_get(request):
     everyone else goes back to the landing page to press Play (which POSTs)."""
     sid = resolve_sid(request)
     if sid and sid in sessions and not outdated(sessions[sid]):
-        return with_cookie(web.HTTPFound(f"/app/{sid}"), sid)
-    return web.HTTPFound("/")
+        return with_cookie(redirect(f"/app/{sid}"), sid)
+    return redirect("/")
 
 
 async def h_ready(request):
@@ -672,11 +672,11 @@ async def h_ready(request):
 async def h_app(request):
     sid = request.match_info["sid"]
     if sid not in sessions:          # expired/reset → landing page (Play re-spawns via POST)
-        return web.HTTPFound("/")
+        return redirect("/")
     if not owns(request, sid):       # not your session → back to the start
-        return web.HTTPFound("/")
+        return redirect("/")
     if outdated(sessions[sid]):      # reload after an image deploy → offer the upgrade
-        return web.HTTPFound("/")
+        return redirect("/")
     return web.Response(text=APP.replace("__SAVE_JS__", SAVE_JS).replace("__SID__", sid),
                         content_type="text/html")
 
@@ -702,9 +702,9 @@ async def h_proxy(request):
     sid = request.match_info["sid"]
     s = sessions.get(sid)
     if not s:
-        return web.HTTPFound("/")
+        return redirect("/")
     if not owns(request, sid):          # bind the terminal/ws to its owner's cookie
-        return web.HTTPForbidden(text="not your session")
+        return web.Response(status=403, text="not your session")
     s["last"] = time.time()
     upstream = f"http://127.0.0.1:{s['port']}{request.rel_url}"
 
@@ -770,11 +770,10 @@ async def h_story(request):
 async def h_leaderboard(request):
     rows = []
     try:
-        c = db()
-        rows = c.execute("SELECT display, accumulated FROM players "
-                         "WHERE finished=1 AND COALESCE(unranked,0)=0 "
-                         "ORDER BY accumulated ASC LIMIT 50").fetchall()
-        c.close()
+        with closing(db()) as c:
+            rows = c.execute("SELECT display, accumulated FROM players "
+                             "WHERE finished=1 AND COALESCE(unranked,0)=0 "
+                             "ORDER BY accumulated ASC LIMIT 50").fetchall()
     except Exception:
         log.exception("leaderboard read failed")
     body = "".join(

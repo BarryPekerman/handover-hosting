@@ -8,12 +8,13 @@ import json
 import os
 import secrets
 import time
+from contextlib import closing
 
-from aiohttp import web, ClientSession, ClientTimeout
+from aiohttp import ClientSession, ClientTimeout
 
 from common import (
-    COOKIE, MAX_LIFE, PID_RE, PUBLIC_URL, RATE_MAX, RATE_WINDOW, db, ip_hits, log, sessions,
-    states, who,
+    COOKIE, MAX_LIFE, PID_RE, PUBLIC_URL, RATE_MAX, RATE_WINDOW, db, ip_hits, log, redirect,
+    sessions, states, who,
 )
 
 # Turnstile (Cloudflare bot check). Sitekey is public; secret lives only on the
@@ -100,15 +101,14 @@ def player_id(request, uid) -> str:
     """The player's random id: the account's (so devices agree), else this
     browser's cookie, else a new one. Never derived from anything about them."""
     if uid:
-        c = db()
-        row = c.execute("SELECT pid FROM player_ids WHERE uid=?", (str(uid),)).fetchone()
-        if not row:
-            pid = request.cookies.get("pid", "")
-            pid = pid if PID_RE.fullmatch(pid) else secrets.token_hex(16)
-            c.execute("INSERT INTO player_ids(uid, pid) VALUES(?,?)", (str(uid), pid))
-            c.commit()
-            row = (pid,)
-        c.close()
+        with closing(db()) as c:
+            row = c.execute("SELECT pid FROM player_ids WHERE uid=?", (str(uid),)).fetchone()
+            if not row:
+                pid = request.cookies.get("pid", "")
+                pid = pid if PID_RE.fullmatch(pid) else secrets.token_hex(16)
+                c.execute("INSERT INTO player_ids(uid, pid) VALUES(?,?)", (str(uid), pid))
+                c.commit()
+                row = (pid,)
         return row[0]
     pid = request.cookies.get("pid", "")
     return pid if PID_RE.fullmatch(pid) else secrets.token_hex(16)
@@ -177,12 +177,12 @@ def oauth_ready() -> bool:
 
 async def h_login(request):
     if not oauth_ready():
-        return web.HTTPFound("/")
+        return redirect("/")
     state = secrets.token_urlsafe(16)
     url = ("https://github.com/login/oauth/authorize"
            f"?client_id={GH_CLIENT_ID}&redirect_uri={PUBLIC_URL}/auth/callback"
            f"&scope=read:user&state={state}")
-    resp = web.HTTPFound(url)
+    resp = redirect(url)
     resp.set_cookie("oauth_state", state, httponly=True, samesite="Lax", max_age=600, path="/")
     return resp
 
@@ -191,7 +191,7 @@ async def h_callback(request):
     code = request.query.get("code", "")
     state = request.query.get("state", "")
     if not oauth_ready() or not code or not state or state != request.cookies.get("oauth_state"):
-        return web.HTTPFound("/")
+        return redirect("/")
     try:
         async with ClientSession() as cs:
             async with cs.post("https://github.com/login/oauth/access_token",
@@ -201,7 +201,7 @@ async def h_callback(request):
                                timeout=ClientTimeout(total=10)) as r:
                 tok = (await r.json()).get("access_token")
             if not tok:
-                return web.HTTPFound("/")
+                return redirect("/")
             async with cs.get("https://api.github.com/user",
                               headers={"Authorization": f"Bearer {tok}", "User-Agent": "handover",
                                        "Accept": "application/vnd.github+json"},
@@ -209,10 +209,10 @@ async def h_callback(request):
                 u = await r.json()
     except Exception:
         log.exception("github oauth error")
-        return web.HTTPFound("/")
+        return redirect("/")
     if not u.get("id") or not u.get("login"):
-        return web.HTTPFound("/")
-    resp = web.HTTPFound("/")
+        return redirect("/")
+    resp = redirect("/")
     resp.set_cookie("ghid", _sign({"uid": u["id"], "login": u["login"]}),
                     httponly=True, samesite="Lax", secure=True, max_age=MAX_LIFE, path="/")
     resp.del_cookie("oauth_state", path="/")
@@ -220,7 +220,7 @@ async def h_callback(request):
 
 
 async def h_logout(request):
-    resp = web.HTTPFound("/")
+    resp = redirect("/")
     resp.del_cookie("ghid", path="/")
     resp.del_cookie(COOKIE, path="/")   # the box stays with the account, not this device
     return resp

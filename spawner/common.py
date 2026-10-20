@@ -7,6 +7,9 @@ import logging
 import os
 import re
 import sqlite3
+from contextlib import closing
+
+from aiohttp import web
 
 LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8080"))
@@ -86,17 +89,22 @@ def events(rows: list[tuple]):
         return
     rows = [(*r[:5], r[5] if len(r) > 5 else None, box_pid.get(r[1])) for r in rows]
     try:
-        c = db()
-        c.executemany("INSERT INTO events(ts,box,kind,level,detail,status,pid) VALUES(?,?,?,?,?,?,?)", rows)
-        c.commit()
-        c.close()
+        with closing(db()) as c:
+            c.executemany("INSERT INTO events(ts,box,kind,level,detail,status,pid) VALUES(?,?,?,?,?,?,?)", rows)
+            c.commit()
     except Exception:
         log.exception("events write failed")
 
 
 def player_row(key):
-    c = db()
-    row = c.execute("SELECT max_level, accumulated, finished FROM players WHERE key=?",
-                    (key,)).fetchone()
-    c.close()
+    with closing(db()) as c:
+        row = c.execute("SELECT max_level, accumulated, finished FROM players WHERE key=?",
+                        (key,)).fetchone()
     return row  # (max_level, accumulated, finished) or None
+
+
+def redirect(url: str) -> web.Response:
+    """A 302 as a plain response. aiohttp's HTTPFound is an exception: returning
+    it is deprecated (gone in aiohttp 4), and in 4 an exception can't carry the
+    cookies these redirects set."""
+    return web.Response(status=302, headers={"Location": url})
