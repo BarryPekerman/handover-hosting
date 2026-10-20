@@ -39,6 +39,15 @@ top. Not player-facing.
   image, so ~420 MiB writable; pool `games`, 30 GiB loop ceiling),
   own uid range per box (`security.idmap.isolated`). Up to **60 players**
   (`MAX_PLAYERS`); measured idle box: 1.4% of a core, 138 MiB RAM, 46 MiB disk.
+- **Standby boxes** (`WARM_SPARES=3`): three boxes (`w-<random>`) are kept
+  started from the live image, so a player gets one at once instead of
+  waiting ~5 s per box created ahead of them; each handout starts a
+  replacement. Fresh starts and resumes both use them (a resume checks its
+  saved passwords against whichever box it gets). They count toward the 60
+  boxes (with 58 players only 2 are kept, at 60 none), carry no events until
+  handed out, are replaced after an image deploy (the reaper checks every
+  30 s), and are deleted and rebuilt on a spawner restart. `handover_spares`
+  in /metrics. To turn them off: `WARM_SPARES=0` in the unit, redeploy.
 - **Code:** hosting (spawner, cloudflared, infra/terraform, this doc) lives in
   **`handover-hosting`**; the game itself lives in **`bandit-wannabe`**, whose CI
   builds the arm64 `handover` image and whose `deploy-image` workflow ships it.
@@ -173,8 +182,8 @@ and the spawner answered `/healthz` within 22 ms throughout.
   and with 50-60 boxes running the 10th of a burst waited ~3 min (table).
   Nobody fails; the spinner waits. Per-box uid ranges aren't the cost: a box
   without one (`security.idmap.isolated=false`) was no faster (4.8 s vs
-  4.5 s), as Incus re-owns the image's files either way. What would help is
-  keeping a few boxes started ahead of time (not built).
+  4.5 s), as Incus re-owns the image's files either way. Standby boxes
+  (above, added after this run) take the first 3 of any burst off the queue.
 - 80 would fit at 256 MiB per box, but that's the squeezed case above: a
   player opening more than the game needs could get processes in their own
   box killed.
@@ -310,6 +319,8 @@ which it ignores.)
 
 ## Change log
 
+- **2026-10-20:** standby boxes (`WARM_SPARES=3`): players get a started box
+  at once; see System at a glance.
 - **2026-10-20:** limit raised to **60 players**: `MAX_PLAYERS=60`, box
   memory 512 -> 320 MiB, disk quota 1536 -> 1400 MiB (Capacity, above).
 - **2026-10-20:** capacity measured (above); box creation serialised host-wide

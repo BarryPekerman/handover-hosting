@@ -21,6 +21,9 @@ PROFILE     = os.environ.get("PROFILE", "isolated")
 # root's subuid range (the box fails to start) or one another box already has.
 LAUNCH_LOCK = os.environ.get("LAUNCH_LOCK", "/run/lock/handover-launch")
 MAX_PLAYERS = int(os.environ.get("MAX_PLAYERS", "60"))
+# Standby boxes kept started so a player gets one at once instead of waiting
+# ~5 s per box queued ahead of them. 0 turns it off.
+WARM_SPARES = int(os.environ.get("WARM_SPARES", "0"))
 IDLE_SEC    = int(os.environ.get("IDLE_MIN", "60")) * 60
 OUTDATED_IDLE = int(os.environ.get("OUTDATED_IDLE_MIN", "5")) * 60
 MAX_LIFE    = int(os.environ.get("MAX_LIFETIME_MIN", "1440")) * 60
@@ -50,6 +53,8 @@ live_ws: set = set()                     # open terminal WebSockets, closed on s
 resume_req: dict[str, tuple] = {}        # sid -> (saved {level: pass}, server-known level, note)
 live_image = ""                          # fingerprint BASE_IMAGE points at now
 background: set = set()                  # running provision tasks (asyncio keeps only weak refs)
+spares: dict[str, str] = {}              # standby boxes ready to hand out: name -> image fingerprint
+in_flight: set = set()                   # box names being created or handed out (the sweep skips them)
 pids: dict[str, str] = {}                # sid -> player id (random; ties one player's boxes together)
 box_pid: dict[str, str] = {}             # container -> player id, for event rows (kept after teardown)
 PID_RE = re.compile(r"[0-9a-f]{32}")

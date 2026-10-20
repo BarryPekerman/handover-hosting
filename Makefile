@@ -16,7 +16,7 @@ $(PY):
 
 test: $(PY) ## Lint + unit tests with coverage (what CI runs; seconds)
 	$(PY) -m ruff check --select F,E9 spawner scripts tests
-	$(PY) -m pytest -q -W error::DeprecationWarning tests/test_*.py --cov=spawner --cov=scripts --cov-report=term-missing --cov-fail-under=77
+	$(PY) -m pytest -q -W error::DeprecationWarning tests/test_*.py --cov=spawner --cov=scripts --cov-report=term-missing --cov-fail-under=79
 
 mutate: $(PY) ## Plant known bugs one at a time; the unit tests must catch each (~1 min)
 	PY=$(PY) tests/mutations.sh
