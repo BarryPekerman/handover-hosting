@@ -39,7 +39,6 @@
 !infra/cloud-init.yaml.tftpl
 !infra/cloudflare.tf
 !infra/github.tf
-!infra/grafana.tf
 !infra/hostkey.tf
 !infra/main.tf
 !infra/metrics.tf
