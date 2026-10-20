@@ -2,6 +2,7 @@
 # The eight end-to-end scenarios; run through run.sh (which starts the spawner).
 # Each check prints ok or FAIL with what happened and what should; the script
 # exits non-zero if any check failed.
+# shellcheck disable=SC2329  # the is_*/saved7/... checks are called through wait_for
 set -uo pipefail
 HERE=$(dirname "$(readlink -f "$0")")
 cd "$HANDOVER_VM_STATE" || exit 1
@@ -10,7 +11,11 @@ PY=${PYTHON:-python3}
 FAILS=0
 
 hid()   { awk '/\thid\t/{print $7}' "$1"; }
-ready() { until curl -s "$U/ready?sid=$1" | grep -q ready; do sleep 1; done; }
+# wait_for <seconds> <command...>: retry once a second; false if it never succeeds.
+# Every wait has a limit, so a stuck spawner fails a check instead of hanging the run.
+wait_for() { local t=$1; shift; for _ in $(seq "$t"); do "$@" && return 0; sleep 1; done; return 1; }
+is_ready() { curl -s "$U/ready?sid=$1" | grep -q ready; }
+ready() { wait_for 90 is_ready "$1" || report FAIL "box ${1:0:12}" "not ready after 90 s"; }
 field() { "$PY" -c "import json, sys; print(json.load(sys.stdin)$1)"; }
 # check <label> <got> <want>: exact match.  check_min <label> <got> <min>: number >= min.
 report() { printf '%-4s %-18s %s\n' "$1" "$2" "$3"; [ "$1" = ok ] || FAILS=$((FAILS + 1)); }
@@ -22,7 +27,8 @@ GH=$(cd "$HERE/../../spawner" && SESSION_SECRET=testsecret "$PY" -c \
 # 1. A fresh box saves the passwords of the levels reached (the VM's login
 #    history has su logins at levels 2 and 7).
 curl -s -c A.jar -d mode=fresh "$U/play" >/dev/null; A=$(hid A.jar); ready "$A"
-until curl -s -b A.jar "$U/save/$A" | grep -q '"7"'; do sleep 3; done
+saved7() { curl -s -b A.jar "$U/save/$A" | grep -q '"7"'; }
+wait_for 60 saved7
 P7=$(curl -s -b A.jar "$U/save/$A" | field '["levels"]["7"]')
 check "1 fresh + save" "level 7 saved, ${#P7} chars" "level 7 saved, 32 chars"
 
@@ -43,10 +49,15 @@ check "4 shared screen" "$("$PY" "$HERE/twodev.py" "$GH" 2>&1 | tail -1 | grep -
 
 # 5. An image deploy: a reload is sent to the landing page, Play upgrades the
 #    box at the level reached.
-echo 22222222 > fp; sleep 35
+echo 22222222 > fp
+outdated() { [ "$(curl -s -o /dev/null -w '%{http_code}' -b B.jar "$U/app/$B")" = 302 ]; }
+wait_for 60 outdated                                 # the spawner looks for a new image every 30 s
 check "5 image update" "reload -> $(curl -s -o /dev/null -w '%{http_code}' -b B.jar "$U/app/$B"), notice $(curl -s -b B.jar "$U/" | grep -c 'got an update')" \
       "reload -> 302, notice 1"
-curl -s -c B.jar -b B.jar -d mode=fresh "$U/play" >/dev/null; ready "$B"; sleep 1
+provisions() { grep -c "provisioned sid=${B:0:12}" spawner.log; }
+before=$(provisions)
+reprovisioned() { [ "$(provisions)" -gt "$before" ]; }
+curl -s -c B.jar -b B.jar -d mode=fresh "$U/play" >/dev/null; ready "$B"; wait_for 15 reprovisioned
 got=$(grep -o "provisioned sid=${B:0:12}.*start=level[0-9]*" spawner.log | tail -1 | grep -o 'start=.*')
 check "  upgraded" "$got on image $(cat "base-p-${B:0:12}")" "start=level7 on image 22222222"
 

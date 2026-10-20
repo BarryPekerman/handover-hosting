@@ -49,9 +49,7 @@ function sync(){
     return r.ok?r.json():null;})
   .then(function(j){
     if(!j)return;
-    var lv=loadSave();
-    (j.drop||[]).forEach(function(n){delete lv[n];});
-    for(var k in j.levels)lv[k]=j.levels[k];
+    var lv=mergeSave(loadSave(),j);
     storeSave(lv);
     var n=topLevel(lv);
     st.textContent=n?'progress saved: level '+n:'saved in this browser';

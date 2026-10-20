@@ -16,7 +16,7 @@ $(PY):
 
 test: $(PY) ## Lint + unit tests with coverage (what CI runs; seconds)
 	$(PY) -m ruff check --select F,E9 spawner scripts tests
-	$(PY) -m pytest -q tests/test_*.py --cov=spawner --cov=scripts --cov-report=term-missing --cov-fail-under=74
+	$(PY) -m pytest -q tests/test_*.py --cov=spawner --cov=scripts --cov-report=term-missing --cov-fail-under=77
 
 mutate: $(PY) ## Plant known bugs one at a time; the unit tests must catch each (~1 min)
 	PY=$(PY) tests/mutations.sh
@@ -24,4 +24,4 @@ mutate: $(PY) ## Plant known bugs one at a time; the unit tests must catch each 
 e2e: $(PY) ## End to end against the Vagrant game VM: real spawner, ttyd, tmux (~3 min)
 	@cd $(BANDIT) && vagrant status handover 2>/dev/null | grep -q 'running' \
 	  || { echo "starting the game VM (make local-up in $(BANDIT))"; $(MAKE) -C $(BANDIT) local-up; }
-	PYTHON=$(abspath $(PY)) BANDIT=$(abspath $(BANDIT)) tests/vm/run.sh </dev/null
+	PYTHON=$(abspath $(PY)) BANDIT=$(abspath $(BANDIT)) timeout 900 tests/vm/run.sh </dev/null

@@ -51,7 +51,7 @@ from aiohttp import web, ClientSession, WSMsgType, WSCloseCode
 
 import common
 from common import (
-    BASE_IMAGE, IDLE_SEC, LISTEN_HOST, LISTEN_PORT, LOGIN_USER, MAX_LIFE, MAX_PLAYERS,
+    BASE_IMAGE, IDLE_SEC, LAUNCH_LOCK, LISTEN_HOST, LISTEN_PORT, LOGIN_USER, MAX_LIFE, MAX_PLAYERS,
     MAX_RESUME, OUTDATED_IDLE, PASS_RE, PORT_BASE, PROFILE, PUBLIC_URL, STATE_FILE,
     WIN_INDEX, background, box_pid, db, events, live_ws, locks, log, pids, player_row,
     resume_req, sessions, states, who,
@@ -389,7 +389,10 @@ async def provision(sid: str) -> dict | None:
             return None
         ct = "p-" + sid[:12]
         # NIC-less launch prints a warning and returns non-zero; that's expected.
-        await run("incus", "launch", BASE_IMAGE, ct, "--profile", PROFILE)
+        # One creation at a time host-wide (see LAUNCH_LOCK); booting is parallel.
+        # A launch takes ~15 s; the timeout keeps a hung one from holding the
+        # lock (and every player after it) forever.
+        await run("flock", LAUNCH_LOCK, "timeout", "120", "incus", "launch", BASE_IMAGE, ct, "--profile", PROFILE)
         ok = False
         for _ in range(40):
             _, out = await run("incus", "exec", ct, "--", "systemctl", "is-system-running")

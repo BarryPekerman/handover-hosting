@@ -282,6 +282,34 @@ def test_logged_errors_are_counted():
     assert "handover_errors_total 2" in metrics.render_metrics()
 
 
+def test_boxes_are_created_under_the_host_wide_launch_lock(monkeypatch):
+    """Incus 6.0 hands out a wrong uid range when two boxes are created at once
+    (measured on the host: the box fails to start, or shares another box's
+    range), so every creation takes LAUNCH_LOCK, which the image deploy's
+    warm-up box takes too. The race itself needs real Incus; scripts/capacity.sh
+    starts boxes in bursts on the host."""
+    calls = []
+
+    async def run(*args):
+        calls.append(args)
+        return 0, "running"
+
+    async def nothing(*a, **k):
+        return "img1"
+    monkeypatch.setattr(sp, "run", run)
+    monkeypatch.setattr(sp, "start_ttyd", nothing)
+    monkeypatch.setattr(sp, "container_image", nothing)
+    monkeypatch.setattr(sp, "save_state", lambda: None)
+
+    async def two_players():
+        await asyncio.gather(sp.provision("a" * 32), sp.provision("b" * 32))
+    asyncio.run(two_players())
+    creates = [c for c in calls if "launch" in c or "init" in c or "copy" in c]
+    assert len(creates) == 2
+    assert all(c[:2] == ("flock", common.LAUNCH_LOCK) and "incus" in c for c in creates)
+    assert set(common.sessions) == {"a" * 32, "b" * 32}
+
+
 def test_share_preview_and_icon_on_pages():
     for page in (sp.LANDING, sp.STORY, sp.LEADERBOARD):
         assert 'property=og:image content="https://play.barrypekerman.com/og.png"' in page
