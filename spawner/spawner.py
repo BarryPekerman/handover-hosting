@@ -887,124 +887,40 @@ async def reaper(app):
 
 
 # ---------- HTTP handlers ----------
+# The pages are plain files in spawner/pages/ (copied next to spawner.py by
+# deploy.yml), read once at startup; edit the text there. Placeholders are
+# filled in here: __ICON__ (favicon, every page) and __SHARE__ (the link-preview
+# og:/twitter: tags LinkedIn, Slack and chat apps build their card from, on the
+# pages people share), then per request __SID__, __ROWS__, __SAVE_JS__ and the
+# landing page's own. The story page holds the premise rather than the front
+# page; Dave's own voice is kept for his first mail in the game (bandit-wannabe
+# VOICE.md). save.js is the browser's save, {"v":1,"levels":{"<n>":"<password>"}}
+# in localStorage, read defensively: a corrupted save just loses the bad entries.
+# The images are spawner/static/.
+HERE = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.environ.get("STATIC_DIR", os.path.join(HERE, "static"))
+PAGES_DIR = os.environ.get("PAGES_DIR", os.path.join(HERE, "pages"))
 
-# Favicon on every page, and the link preview (LinkedIn, Slack, chat apps build
-# their card from the og:/twitter: tags) on the pages people share. The images
-# are spawner/static/, copied next to spawner.py by deploy.yml.
-STATIC_DIR = os.environ.get("STATIC_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"))
-SHARE_DESC = ("Dave won the lottery and left you his server. Nothing is documented. "
-              "A Linux & DevOps wargame in your browser: your own box, 21 levels, nothing to install.")
+
+def read_page(name: str) -> str:
+    with open(os.path.join(PAGES_DIR, name), encoding="utf-8") as f:
+        return f.read().removesuffix("\n")
+
+
 ICON = '<link rel=icon type=image/png href=/favicon.ico>'
-SHARE = ICON + f"""
-<meta name=description content="{SHARE_DESC}">
-<meta property=og:type content=website>
-<meta property=og:site_name content="The Handover">
-<meta property=og:title content="The Handover — a Linux & DevOps wargame">
-<meta property=og:description content="{SHARE_DESC}">
-<meta property=og:url content="{PUBLIC_URL}/">
-<meta property=og:image content="{PUBLIC_URL}/og.png">
-<meta property=og:image:width content=1200>
-<meta property=og:image:height content=627>
-<meta property=og:image:alt content="THE HANDOVER: Dave won the lottery and left you his server. Nothing is documented.">
-<meta name=twitter:card content=summary_large_image>"""
+SHARE = ICON + "\n" + read_page("share.html").replace("__PUBLIC_URL__", PUBLIC_URL)
 
-LANDING = """<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">""" + SHARE + """
-<title>The Handover</title><style>
-:root{color-scheme:dark}
-body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;
-justify-content:center;background:#000;color:#33ff66;font-family:monospace;text-align:center}
-/* one vertical rhythm: title -> hook small, hook -> buttons -> links equal */
-h1{margin:0 0 1rem}p{margin:0}a{color:#33ff66}
-.hook{font-size:1.05rem;line-height:1.65;text-wrap:balance}
-form{display:flex;flex-direction:column;align-items:center;gap:.7rem;margin-top:2rem}
-.links{margin-top:2rem;opacity:.8}.signin{margin-top:.9rem;opacity:.8;font-size:.9rem}
-.play{margin:0;padding:.8rem 2.2rem;border:1px solid #33ff66;color:#33ff66;
-background:none;font-family:monospace;font-size:1.2rem;cursor:pointer}
-.play:hover{background:#33ff66;color:#000}
-p{max-width:34rem;line-height:1.5;padding:0 1rem}
-.cf-turnstile{margin-top:.3rem}
-.notice{margin-top:1.4rem;opacity:.55;font-size:.8rem}
-</style>__TS_SCRIPT__</head><body>
-<h1>THE HANDOVER</h1>
-<p class=hook>Dave won the lottery and left you his server.<br>Nothing is documented.</p>
-<form method="post" action="/play"><input type=hidden name=save id=save>
-<button class=play type=submit name=mode value=resume id=resume hidden></button>
-<button class=play type=submit name=mode value=fresh id=fresh>&gt; play</button>
-__TS_WIDGET__</form>
-<p class=links><a href="/story">story &amp; how to play</a>
-&nbsp;&middot;&nbsp; <a href="/leaderboard">leaderboard</a></p>
-<p class=signin>__SIGNIN__</p>
-<p class=notice>Playing records your session (commands and timings) under a random ID,
-for a public breakdown when the game closes. <a href="/story#record">What we record</a></p>
-<script>__SAVE_JS__
-(function(){
-  var lv=loadSave(),n=Math.max(topLevel(lv),__SRV__);
-  if(!n)return;
-  var r=document.getElementById('resume');
-  r.hidden=false;r.textContent='> resume at level '+n;
-  document.getElementById('fresh').textContent='> start from level 0';
-  document.getElementById('save').value=JSON.stringify({levels:lv});
-})();
-</script>
-</body></html>"""
 
-# The premise lives here rather than on the front page; Dave's own voice is
-# kept for his first mail in the game (bandit-wannabe VOICE.md).
-STORY = """<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">""" + SHARE + """
-<title>The Handover - story</title><style>
-:root{color-scheme:dark}
-body{margin:0;min-height:100vh;background:#000;color:#33ff66;font-family:monospace;
-display:flex;flex-direction:column;align-items:center;padding:2rem 1rem}
-main{max-width:36rem;line-height:1.55}h1{margin:.2rem 0;text-align:center}
-h2{font-size:1rem;margin:2rem 0 .4rem;border-bottom:1px solid #0a3;padding-bottom:.2rem}
-a{color:#33ff66}code{background:#021;padding:0 .25rem}ul{padding-left:1.2rem}li{margin:.3rem 0}
-.dim{opacity:.75}em{font-style:italic}
-</style></head><body><main>
-<h1>THE HANDOVER</h1>
+def page(name: str) -> str:
+    return read_page(name).replace("__SHARE__", SHARE).replace("__ICON__", ICON)
 
-<h2>The story</h2>
-<p>Congratulations &mdash; you're the DevOps team.</p>
-<p>Nobody quite put it that way when they hired you. They talked about the product, the
-roadmap, the funding round. Your laptop arrived before your contract did. The servers came
-up once, in passing: <em>"Dave handles that."</em></p>
-<p>Dave won the lottery last week. The actual lottery. You've got his server, his logins,
-and a pile of notes he wrote on the way to the airport.</p>
-<p>Somewhere on that box is his admin password. Find it, and everything he built is yours.</p>
 
-<h2>How it works</h2>
-<ul>
-<li>Press play and you get your own Linux box in the browser. Nothing to install, nobody
-else on it.</li>
-<li><code>mail</code> reads Dave's note. Each level's puzzle hides the next account's
-password; <code>go 3</code> logs you into level 3.</li>
-<li>Your progress saves in this browser &mdash; if your session resets, come back and resume.
-Sign in with GitHub to keep the same box on every device and to appear on the
-leaderboard.</li>
-<li>Stuck? Re-read the note; <code>man</code> is there. The box has no internet &mdash;
-everything you need is already on it.</li>
-</ul>
-
-<h2>What you'll touch</h2>
-<p class=dim>No spoilers: files and filesystems &middot; permissions and sudo &middot; git's
-insides &middot; processes, signals and cron. 21 levels, four acts.</p>
-
-<h2>Fair play</h2>
-<p class=dim>Everyone gets the same passwords, so yes, you could look them up. It's your game
-to spoil. The leaderboard only counts runs that climb every level.</p>
-
-<h2 id=record>What we record</h2>
-<p class=dim>By playing, you agree that your session is recorded: the commands you type
-in the game (the whole line, and whether it worked), wrong passwords, and when you
-reach each level. It's stored under a random ID, not your name; no IP addresses are
-kept. If you sign in with GitHub, that ID is linked to your account (so your devices
-share it) and your handle appears on the leaderboard. When the game closes, the results are published as totals and averages
-(fastest, slowest, typical times, popular commands per level), and the raw records
-are deleted. Don't type anything private into the game.</p>
-
-<p style="margin-top:2rem;text-align:center"><a href="/">&larr; back to play</a></p>
-</main></body></html>"""
+LANDING = page("landing.html")
+STORY = page("story.html")
+LEADERBOARD = page("leaderboard.html")
+SPAWNING = page("spawning.html")
+SAVE_JS = page("save.js")
+APP = page("app.html")
 
 
 def message_page(title: str, heading: str, body: str, color: str) -> str:
@@ -1021,132 +937,6 @@ SLOWDOWN = message_page("Slow down", "easy there",
 TS_FAIL = message_page("Are you human?", "couldn't verify you",
                        'The human check didn\'t pass. <a href="/">go back</a> and press Play again.',
                        "#ff5555")
-
-
-LEADERBOARD = """<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">""" + SHARE + """
-<title>The Handover - leaderboard</title><style>
-:root{color-scheme:dark}
-body{margin:0;min-height:100vh;background:#000;color:#33ff66;font-family:monospace;
-display:flex;flex-direction:column;align-items:center;padding:2rem 1rem}
-h1{margin:.2rem 0}table{border-collapse:collapse;margin-top:1.2rem;width:100%;max-width:34rem}
-td,th{padding:.4rem .8rem;border-bottom:1px solid #0a3;text-align:left}
-th{opacity:.7;font-weight:normal}td:first-child{opacity:.6}td:last-child{text-align:right}
-a{color:#33ff66}p{opacity:.7}
-</style></head><body>
-<h1>THE HANDOVER</h1><p>fastest to recover Dave's admin password</p>
-<table><tr><th>#</th><th>who</th><th>time</th></tr>__ROWS__</table>
-<p style="margin-top:1.5rem"><a href="/">&larr; back</a></p>
-</body></html>"""
-
-SPAWNING = """<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">""" + ICON + """
-<title>Spinning up…</title><style>
-:root{color-scheme:dark}
-body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;
-justify-content:center;background:#000;color:#33ff66;font-family:monospace;text-align:center}
-.dots::after{content:'';animation:d 1.2s steps(4,end) infinite}
-@keyframes d{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
-.spin{width:2.2rem;height:2.2rem;margin:1.4rem;border:3px solid #0a3;border-top-color:#33ff66;
-border-radius:50%;animation:s .8s linear infinite}@keyframes s{to{transform:rotate(360deg)}}
-.err{color:#ff5555}
-</style></head><body>
-<h2>spinning up your server<span class=dots></span></h2>
-<div class=spin></div>
-<p id=msg>handing you Dave's box — a few seconds.</p>
-<script>
-const sid="__SID__";
-async function poll(){
-  try{
-    const r=await fetch("/ready?sid="+sid,{cache:"no-store"});
-    const j=await r.json();
-    if(j.state==="ready"){location.replace("/app/"+sid);return;}
-    if(j.state==="full"){document.getElementById("msg").outerHTML=
-      "<p class=err>server full — every seat is taken right now.<br>Seats free up as players go idle; try again in a few minutes. <a style=color:#33ff66 href=/play>retry</a></p>";return;}
-    if(j.state==="error"){document.getElementById("msg").outerHTML=
-      "<p class=err>something broke spinning up. <a style=color:#33ff66 href=/play>retry</a></p>";return;}
-  }catch(e){}
-  setTimeout(poll,1200);
-}
-poll();
-</script>
-</body></html>"""
-
-# The browser's save: {"v":1,"levels":{"<n>":"<password>"}} in localStorage.
-# Read defensively - a hand-edited or corrupted save just loses the bad entries.
-SAVE_JS = r"""var SAVE_KEY='handover-save';
-function loadSave(){var lv={};
-  try{var d=JSON.parse(localStorage.getItem(SAVE_KEY));
-    if(d&&d.levels&&typeof d.levels==='object')for(var k in d.levels){var v=d.levels[k];
-      if(/^([1-9]|1[0-9]|20)$/.test(k)&&typeof v==='string'&&/^[A-Za-z0-9]{1,64}$/.test(v))lv[k]=v;}
-  }catch(e){}
-  return lv;}
-function storeSave(lv){try{localStorage.setItem(SAVE_KEY,JSON.stringify({v:1,levels:lv}));}catch(e){}}
-function topLevel(lv){var m=0;for(var k in lv)m=Math.max(m,+k);return m;}"""
-
-APP = """<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">""" + ICON + """
-<title>The Handover</title><style>
-:root{color-scheme:dark}*{box-sizing:border-box}
-body{margin:0;height:100vh;display:flex;background:#000;color:#33ff66;
-font-family:monospace;overflow:hidden}
-#term{flex:1;border:0;height:100vh;width:100%}
-#notes{width:300px;max-width:42vw;display:flex;flex-direction:column;
-border-left:1px solid #0a3;background:#021}
-#notes h3{margin:0;padding:.5rem .7rem;font-size:.8rem;border-bottom:1px solid #0a3;
-display:flex;justify-content:space-between;align-items:center;font-weight:normal}
-#notes h3 b{color:#33ff66}#notes h3 span{opacity:.55}
-#pad{flex:1;background:#000;color:#33ff66;border:0;padding:.6rem;
-font-family:monospace;font-size:.85rem;line-height:1.5;resize:none;outline:none}
-#toggle{position:fixed;top:.4rem;right:.4rem;z-index:10;background:#021;color:#33ff66;
-border:1px solid #0a3;padding:.35rem .7rem;cursor:pointer;font-family:monospace;display:none}
-.hidden{display:none!important}
-#toast{position:fixed;top:.6rem;left:50%;transform:translateX(-50%);z-index:20;
-background:#021;border:1px solid #33ff66;padding:.5rem .9rem;max-width:90vw;transition:opacity .6s}
-@media(max-width:700px){
-  #notes{position:fixed;top:0;right:0;height:100vh;width:82vw;max-width:none;z-index:9;
-    box-shadow:-8px 0 24px #000}
-  #toggle{display:block}
-}
-</style></head><body>
-<iframe id=term src="/t/__SID__/" title="terminal"></iframe>
-<aside id=notes>
-  <h3><b>your notes</b> <span id=st>saved in this browser</span></h3>
-  <textarea id=pad spellcheck=false placeholder="Your progress saves automatically. Jot down anything else worth remembering.
-
-Stays in your browser &mdash; never sent to the server."></textarea>
-</aside>
-<button id=toggle>notes</button>
-<script>
-var pad=document.getElementById('pad'),notes=document.getElementById('notes'),
-    tg=document.getElementById('toggle'),KEY='handover-notes';
-try{pad.value=localStorage.getItem(KEY)||'';}catch(e){}
-pad.addEventListener('input',function(){try{localStorage.setItem(KEY,pad.value);}catch(e){}});
-tg.addEventListener('click',function(){notes.classList.toggle('hidden');});
-if(matchMedia('(max-width:700px)').matches)notes.classList.add('hidden');
-__SAVE_JS__
-var st=document.getElementById('st'),noted=false;
-function toast(t){var d=document.createElement('div');d.id='toast';d.textContent=t;
-  document.body.appendChild(d);setTimeout(function(){d.style.opacity=0;},5000);
-  setTimeout(function(){d.remove();},6000);}
-function sync(){
-  fetch('/save/__SID__',{cache:'no-store'}).then(function(r){
-    if(r.status===404){location.replace('/');return null;}   // session recycled
-    return r.ok?r.json():null;})
-  .then(function(j){
-    if(!j)return;
-    var lv=loadSave();
-    (j.drop||[]).forEach(function(n){delete lv[n];});
-    for(var k in j.levels)lv[k]=j.levels[k];
-    storeSave(lv);
-    var n=topLevel(lv);
-    st.textContent=n?'progress saved: level '+n:'saved in this browser';
-    if(j.note&&!noted){noted=true;toast(j.note);}
-  }).catch(function(){});
-}
-sync();setInterval(sync,20000);
-</script>
-</body></html>"""
 
 
 async def h_landing(request):
