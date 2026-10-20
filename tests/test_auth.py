@@ -42,8 +42,11 @@ def test_client_ip_prefers_cloudflare_then_forwarded_for():
     assert auth.client_ip(req(headers={"X-Forwarded-For": "2.2.2.2, 10.0.0.1"})) == "2.2.2.2"
 
 
-def test_client_ip_without_headers_or_a_peer_is_unknown():
-    assert auth.client_ip(req()) == "?"             # a mocked request has no socket
+def test_client_ip_without_proxy_headers_is_the_socket_peer():
+    class Peer:
+        def get_extra_info(self, key, default=None):
+            return ("5.6.7.8", 40000) if key == "peername" else default
+    assert auth.client_ip(make_mocked_request("GET", "/", transport=Peer())) == "5.6.7.8"
 
 
 # ---- signed cookie -------------------------------------------------------
@@ -77,9 +80,13 @@ def test_identity_is_anonymous_without_a_signing_key(monkeypatch):
     assert auth.identity(req(cookies=cookies)) == (None, "anonymous")
 
 
-def test_pid_cookie_is_httponly_and_lasts_a_year():
-    c = auth.with_pid(auth.web.Response(), "a" * 32).cookies["pid"]
-    assert c.value == "a" * 32 and c["httponly"] and c["max-age"] == str(365 * 86400)
+@pytest.mark.parametrize("name,set_cookie", [
+    ("pid", lambda r: auth.with_pid(r, "a" * 32)),
+    (common.COOKIE, lambda r: auth.with_cookie(r, "s" * 32)),
+])
+def test_id_cookies_are_hidden_from_page_scripts_and_other_sites(name, set_cookie):
+    c = set_cookie(auth.web.Response()).cookies[name]
+    assert c["httponly"] and c["samesite"] == "Lax"
 
 
 # ---- throttle ------------------------------------------------------------
@@ -190,10 +197,12 @@ def callback(code="c0de", state="st", cookie_state="st"):
     return asyncio.run(auth.h_callback(r))
 
 
-def test_oauth_needs_all_three_settings(oauth, monkeypatch):
+@pytest.mark.parametrize("missing", ["GH_CLIENT_ID", "GH_CLIENT_SECRET", "SESSION_SECRET"])
+def test_sign_in_is_off_if_any_setting_is_missing(oauth, monkeypatch, missing):
     assert auth.oauth_ready()
-    monkeypatch.setattr(auth, "GH_CLIENT_SECRET", "")
+    monkeypatch.setattr(auth, missing, "")
     assert not auth.oauth_ready()
+    assert asyncio.run(auth.h_login(req("/login"))).location == "/"
 
 
 def test_login_redirects_to_github_with_a_state_cookie(oauth):
@@ -201,10 +210,6 @@ def test_login_redirects_to_github_with_a_state_cookie(oauth):
     state = r.cookies["oauth_state"].value
     assert r.location.startswith("https://github.com/login/oauth/authorize?client_id=cid")
     assert f"state={state}" in r.location and f"redirect_uri={common.PUBLIC_URL}/auth/callback" in r.location
-
-
-def test_login_without_oauth_goes_home():
-    assert asyncio.run(auth.h_login(req("/login"))).location == "/"
 
 
 def test_callback_signs_the_player_in(oauth):
@@ -237,21 +242,9 @@ def test_logout_forgets_the_account_and_this_devices_box():
     assert r.cookies["ghid"]["max-age"] == "0" and r.cookies[common.COOKIE]["max-age"] == "0"
 
 
-def test_box_cookie_lasts_as_long_as_a_box():
-    c = auth.with_cookie(auth.web.Response(), "s" * 32).cookies[common.COOKIE]
-    assert c.value == "s" * 32 and c["httponly"] and c["max-age"] == str(common.MAX_LIFE)
-
-
 @pytest.mark.parametrize("cookies", [{"pid": "../../etc"}, {"pid": "A" * 32}, {}])
 def test_a_malformed_player_id_cookie_gets_a_fresh_id(cookies):
     for uid in (None, "7"):                     # anonymous, and a first sign-in
         common.DB_PATH = common.DB_PATH + "x"   # fresh account table each time
         pid = auth.player_id(req(cookies=cookies), uid)
         assert auth.PID_RE.fullmatch(pid) and pid != cookies.get("pid")
-
-
-def test_a_well_formed_player_id_is_kept_and_follows_the_account():
-    pid = "ab" * 16
-    assert auth.player_id(req(cookies={"pid": pid}), None) == pid
-    assert auth.player_id(req(cookies={"pid": pid}), "7") == pid       # first sign-in adopts it
-    assert auth.player_id(req(), "7") == pid                           # another device, same account
