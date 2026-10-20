@@ -27,6 +27,7 @@
 !.github/workflows/rebuild.yml
 !.github/workflows/terraform.yml
 !.gitignore
+!Makefile
 !README.md
 !docs/hardening-plan.md
 !docs/ops-notes.md
@@ -49,7 +50,10 @@
 !infra/variables.tf
 !spawner/handover-spawner.service
 !scripts/results.py
+!spawner/auth.py
+!spawner/common.py
 !spawner/gamedata.py
+!spawner/metrics.py
 !spawner/spawner.py
 !spawner/pages/app.html
 !spawner/pages/landing.html
@@ -61,6 +65,8 @@
 !spawner/static/favicon.png
 !spawner/static/og.png
 !tests/README.md
+!tests/test_auth.py
+!tests/test_metrics.py
 !tests/test_results.py
 !tests/test_spawner.py
 !tests/vm/bin/incus
