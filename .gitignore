@@ -36,7 +36,6 @@
 !host/deploy-keys/handover-hosting.pub
 !host/site.yml
 !infra/README.md
-!infra/apex.tf
 !infra/cloud-init.yaml.tftpl
 !infra/cloudflare.tf
 !infra/github.tf
