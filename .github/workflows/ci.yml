@@ -16,7 +16,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Spawner compiles
-        run: python3 -m py_compile spawner/spawner.py
+        run: python3 -m py_compile spawner/*.py
       # aiohttp pinned to the host's version (Ubuntu 24.04's python3-aiohttp).
       - name: Spawner unit tests
         run: |

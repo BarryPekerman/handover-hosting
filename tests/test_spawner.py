@@ -16,6 +16,9 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "spawner"))
 import spawner as sp  # noqa: E402
+import auth  # noqa: E402
+import common  # noqa: E402
+import metrics  # noqa: E402
 
 PW = "A" * 32
 
@@ -26,31 +29,31 @@ class Req:
     def __init__(self, hid=None, uid=None):
         self.cookies = {}
         if hid:
-            self.cookies[sp.COOKIE] = hid
+            self.cookies[common.COOKIE] = hid
         if uid:
-            self.cookies["ghid"] = sp._sign({"uid": uid, "login": "u" + str(uid)})
+            self.cookies["ghid"] = auth._sign({"uid": uid, "login": "u" + str(uid)})
 
 
 @pytest.fixture(autouse=True)
 def tmp_db(tmp_path):
-    sp.DB_PATH = str(tmp_path / "lb.db")
+    common.DB_PATH = str(tmp_path / "lb.db")
 
 
 def setup_function():
-    sp.SESSION_SECRET = "test-secret"
-    sp.sessions.clear()
-    sp.who.clear()
-    sp.states.clear()
-    sp.live_image = ""
-    sp.counters.clear()
-    sp.solve_hist.clear()
-    sp.pids.clear()
-    sp.box_pid.clear()
+    auth.SESSION_SECRET = "test-secret"
+    common.sessions.clear()
+    common.who.clear()
+    common.states.clear()
+    common.live_image = ""
+    metrics.counters.clear()
+    metrics.solve_hist.clear()
+    common.pids.clear()
+    common.box_pid.clear()
 
 
 def box(sid, uid=None, **kw):
-    sp.sessions[sid] = {"start": 0, "passes": {}, "image": "img1", **kw}
-    sp.who[sid] = {"uid": uid, "display": "x"}
+    common.sessions[sid] = {"start": 0, "passes": {}, "image": "img1", **kw}
+    common.who[sid] = {"uid": uid, "display": "x"}
 
 
 # ---- browser saves -------------------------------------------------------
@@ -110,7 +113,7 @@ def test_solve_time_ignores_gaps_and_clock_skew():
 
 def test_skipped_levels():
     assert not sp.skipped_levels({0: 1, 1: 2, 2: 3}, 0, 2)
-    assert sp.skipped_levels({0: 1, sp.WIN_INDEX: 2}, 0, sp.WIN_INDEX)   # straight to dave
+    assert sp.skipped_levels({0: 1, common.WIN_INDEX: 2}, 0, common.WIN_INDEX)   # straight to dave
     assert not sp.skipped_levels({5: 1, 6: 2}, 5, 6)                    # returning player
     assert sp.skipped_levels({6: 2}, 5, 6)
 
@@ -119,77 +122,77 @@ def test_skipped_levels():
 
 def test_account_box_follows_the_account():
     box("s1", uid="42")
-    assert sp.resolve_sid(Req(uid="42")) == "s1"                 # new device, no cookie
-    assert sp.owns(Req(uid="42"), "s1")
+    assert auth.resolve_sid(Req(uid="42")) == "s1"                 # new device, no cookie
+    assert auth.owns(Req(uid="42"), "s1")
 
 
 def test_other_account_never_gets_the_box():
     box("s1", uid="42")
-    assert sp.resolve_sid(Req(hid="s1", uid="99")) is None       # stale cookie, other account
-    assert not sp.owns(Req(hid="s1", uid="99"), "s1")
+    assert auth.resolve_sid(Req(hid="s1", uid="99")) is None       # stale cookie, other account
+    assert not auth.owns(Req(hid="s1", uid="99"), "s1")
 
 
 def test_anonymous_box_by_cookie_and_claimed_on_sign_in():
     box("s2")
-    assert sp.owns(Req(hid="s2"), "s2")
-    assert not sp.owns(Req(), "s2")
-    assert sp.resolve_sid(Req(hid="s2", uid="7")) == "s2"        # sign-in claims it
-    sp.remember("s2", "7", "@u7")
-    assert sp.who["s2"]["uid"] == "7"
-    sp.remember("s2", None, "anonymous")                        # signing out never downgrades
-    assert sp.who["s2"]["uid"] == "7"
+    assert auth.owns(Req(hid="s2"), "s2")
+    assert not auth.owns(Req(), "s2")
+    assert auth.resolve_sid(Req(hid="s2", uid="7")) == "s2"        # sign-in claims it
+    auth.remember("s2", "7", "@u7")
+    assert common.who["s2"]["uid"] == "7"
+    auth.remember("s2", None, "anonymous")                        # signing out never downgrades
+    assert common.who["s2"]["uid"] == "7"
 
 
 def test_forged_identity_cookie_is_ignored():
     box("s1", uid="42")
     r = Req()
-    r.cookies["ghid"] = sp._sign({"uid": "42", "login": "x"})[:-4] + "0000"
-    assert sp.identity(r) == (None, "anonymous")
-    assert not sp.owns(r, "s1")
+    r.cookies["ghid"] = auth._sign({"uid": "42", "login": "x"})[:-4] + "0000"
+    assert auth.identity(r) == (None, "anonymous")
+    assert not auth.owns(r, "s1")
 
 
 # ---- image updates -------------------------------------------------------
 
 def test_outdated_and_reached_level():
     box("s1", start=3, passes={4: PW, 5: PW})
-    assert not sp.outdated(sp.sessions["s1"])                  # live image unknown yet
-    sp.live_image = "img1"
-    assert not sp.outdated(sp.sessions["s1"])
-    sp.live_image = "img2"
-    assert sp.outdated(sp.sessions["s1"])
-    assert sp.reached_level(sp.sessions["s1"]) == 5
+    assert not sp.outdated(common.sessions["s1"])                  # live image unknown yet
+    common.live_image = "img1"
+    assert not sp.outdated(common.sessions["s1"])
+    common.live_image = "img2"
+    assert sp.outdated(common.sessions["s1"])
+    assert sp.reached_level(common.sessions["s1"]) == 5
 
 
 # ---- metrics -------------------------------------------------------------
 
 def test_progress_counted_once_per_box():
     box("s1")
-    s = sp.sessions["s1"]
-    sp.count_progress(s, {0: 100, 1: 160})
-    sp.count_progress(s, {0: 100, 1: 160, 2: 400})          # next poll: only level 2 is new
-    reached = {dict(k[1])["level"]: v for k, v in sp.counters.items()
+    s = common.sessions["s1"]
+    metrics.count_progress(s, {0: 100, 1: 160})
+    metrics.count_progress(s, {0: 100, 1: 160, 2: 400})          # next poll: only level 2 is new
+    reached = {dict(k[1])["level"]: v for k, v in metrics.counters.items()
                if k[0] == "handover_level_reached_total"}
     assert reached == {"0": 1, "1": 1, "2": 1}
-    assert sp.solve_hist[0][-2:] == [1, 60] and sp.solve_hist[1][-2:] == [1, 240]
-    text = sp.render_metrics()
+    assert metrics.solve_hist[0][-2:] == [1, 60] and metrics.solve_hist[1][-2:] == [1, 240]
+    text = metrics.render_metrics()
     assert 'handover_level_solve_seconds_bucket{level="1",le="300"} 1' in text
     assert 'handover_player_level{level="2"} 1' in text
 
 
 def test_resumed_box_does_not_time_levels_before_its_start():
     box("s1", start=5)
-    sp.count_progress(sp.sessions["s1"], {4: 10, 5: 20, 6: 80})
-    assert list(sp.solve_hist) == [5]
+    metrics.count_progress(common.sessions["s1"], {4: 10, 5: 20, 6: 80})
+    assert list(metrics.solve_hist) == [5]
 
 
 def test_long_breaks_stay_out_of_the_histogram_but_in_events():
     box("s1", ct="p-1")
-    sp.count_progress(sp.sessions["s1"], {0: 0, 1: sp.SOLVE_CAP + 1, 2: sp.SOLVE_CAP + 61})
-    assert list(sp.solve_hist) == [1]                                   # level 0 was capped
-    assert sp.counters[("handover_level_solve_capped_total", (("level", "0"),))] == 1
-    rows = sqlite3.connect(sp.DB_PATH).execute("SELECT ts, box, kind, level FROM events").fetchall()
-    assert rows == [(0, "p-1", "reach", 0), (sp.SOLVE_CAP + 1, "p-1", "reach", 1),
-                    (sp.SOLVE_CAP + 61, "p-1", "reach", 2)]
+    metrics.count_progress(common.sessions["s1"], {0: 0, 1: metrics.SOLVE_CAP + 1, 2: metrics.SOLVE_CAP + 61})
+    assert list(metrics.solve_hist) == [1]                                   # level 0 was capped
+    assert metrics.counters[("handover_level_solve_capped_total", (("level", "0"),))] == 1
+    rows = sqlite3.connect(common.DB_PATH).execute("SELECT ts, box, kind, level FROM events").fetchall()
+    assert rows == [(0, "p-1", "reach", 0), (metrics.SOLVE_CAP + 1, "p-1", "reach", 1),
+                    (metrics.SOLVE_CAP + 61, "p-1", "reach", 2)]
 
 
 def test_commands_from_the_journal():
@@ -212,16 +215,16 @@ def test_commands_from_the_journal():
     ])
     found, cursor = sp.parse_commands(out)
     assert found == [(5, 3, "cmd", "find / -perm -4000 2>/dev/null", 0), (6, 3, "cmd", "find", None),
-                     (7, sp.WIN_INDEX, "cmd", "frobnicate --x", 127), (8, 3, "badpass", "level4", None)]
+                     (7, common.WIN_INDEX, "cmd", "frobnicate --x", 127), (8, 3, "badpass", "level4", None)]
     assert cursor == "c6"
     box("s1", ct="p-1")
-    sp.box_pid["p-1"] = "a" * 32
-    sp.count_commands(sp.sessions["s1"], found)
-    text = sp.render_metrics()
+    common.box_pid["p-1"] = "a" * 32
+    metrics.count_commands(common.sessions["s1"], found)
+    text = metrics.render_metrics()
     assert 'handover_commands_total{cmd="find",level="3"} 2' in text
     assert 'handover_commands_total{cmd="other",level="21"} 1' in text
     assert 'handover_wrong_passwords_total{level="3"} 1' in text
-    rows = sqlite3.connect(sp.DB_PATH).execute("SELECT kind, detail, status, pid FROM events").fetchall()
+    rows = sqlite3.connect(common.DB_PATH).execute("SELECT kind, detail, status, pid FROM events").fetchall()
     assert rows[0] == ("cmd", "find / -perm -4000 2>/dev/null", 0, "a" * 32)
     assert rows[-1] == ("badpass", "level4", None, "a" * 32)
 
@@ -229,44 +232,44 @@ def test_commands_from_the_journal():
 def test_player_id_follows_cookie_then_account():
     r = Req()
     r.cookies["pid"] = "b" * 32
-    assert sp.player_id(r, None) == "b" * 32                    # same browser, same player
+    assert auth.player_id(r, None) == "b" * 32                    # same browser, same player
     r.cookies["pid"] = "not-a-pid"
-    assert sp.PID_RE.fullmatch(sp.player_id(r, None))          # junk cookie: a fresh id
+    assert common.PID_RE.fullmatch(auth.player_id(r, None))          # junk cookie: a fresh id
     r.cookies["pid"] = "c" * 32
-    assert sp.player_id(r, "42") == "c" * 32                    # first sign-in adopts this browser's id
+    assert auth.player_id(r, "42") == "c" * 32                    # first sign-in adopts this browser's id
     r2 = Req()
     r2.cookies["pid"] = "d" * 32
-    assert sp.player_id(r2, "42") == "c" * 32                   # another device gets the account's id
+    assert auth.player_id(r2, "42") == "c" * 32                   # another device gets the account's id
 
 
 def test_cmd_name_for_metrics():
-    assert sp.cmd_name("find / -name x") == "find"
-    assert sp.cmd_name("/usr/bin/grep -r x") == "grep"
-    assert sp.cmd_name("./run.sh") == "other"
-    assert sp.cmd_name("") == "other"
+    assert metrics.cmd_name("find / -name x") == "find"
+    assert metrics.cmd_name("/usr/bin/grep -r x") == "grep"
+    assert metrics.cmd_name("./run.sh") == "other"
+    assert metrics.cmd_name("") == "other"
 
 
 def test_quiet_game_reads_zero_not_missing():
-    sp.init_counters()
-    text = sp.render_metrics()
+    metrics.init_counters()
+    text = metrics.render_metrics()
     assert 'handover_level_reached_total{level="0"} 0' in text
-    assert f'handover_level_reached_total{{level="{sp.WIN_INDEX}"}} 0' in text
+    assert f'handover_level_reached_total{{level="{common.WIN_INDEX}"}} 0' in text
     assert 'handover_box_starts_total{result="error"} 0' in text
     assert "handover_errors_total 0" in text
-    sp.count_progress({"ct": "p-1"}, {0: 100})                 # init never resets real counts
-    sp.init_counters()
-    assert 'handover_level_reached_total{level="0"} 1' in sp.render_metrics()
+    metrics.count_progress({"ct": "p-1"}, {0: 100})                 # init never resets real counts
+    metrics.init_counters()
+    assert 'handover_level_reached_total{level="0"} 1' in metrics.render_metrics()
 
 
 def test_logged_errors_are_counted():
-    sp.init_counters()
-    sp.log.error("boom")
+    metrics.init_counters()
+    common.log.error("boom")
     try:
         raise RuntimeError("x")
     except RuntimeError:
-        sp.log.exception("provision failed")
-    sp.log.warning("not an error")
-    assert "handover_errors_total 2" in sp.render_metrics()
+        common.log.exception("provision failed")
+    common.log.warning("not an error")
+    assert "handover_errors_total 2" in metrics.render_metrics()
 
 
 def test_share_preview_and_icon_on_pages():
@@ -311,8 +314,8 @@ def test_static_images_are_served():
 def test_player_data_endpoints():
     from aiohttp.test_utils import TestClient, TestServer
     A = "a" * 32
-    sp.db().close()
-    c = sqlite3.connect(sp.DB_PATH)
+    common.db().close()
+    c = sqlite3.connect(common.DB_PATH)
     c.executemany("INSERT INTO events(ts,box,kind,level,detail,status,pid) VALUES(?,?,?,?,?,?,?)", [
         (100, "p-1", "reach", 0, "", None, A), (130, "p-1", "cmd", 0, "cat readme", 0, A),
         (140, "p-1", "badpass", 0, "level1", None, A), (160, "p-1", "reach", 1, "", None, A),
@@ -320,7 +323,7 @@ def test_player_data_endpoints():
     c.commit()
 
     async def go():
-        async with TestClient(TestServer(sp.make_metrics_app())) as cl:
+        async with TestClient(TestServer(metrics.make_metrics_app())) as cl:
             players = await (await cl.get("/data/players")).json()
             assert len(players) == 1 and players[0]["player"] == "aaaaaaaa"
             assert (players[0]["level"], players[0]["commands"], players[0]["wrong_passwords"]) == (1, 1, 1)

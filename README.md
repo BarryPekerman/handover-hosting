@@ -67,8 +67,11 @@ run: `ansible-playbook -i <host>, -u ubuntu --private-key <key> host/site.yml --
 
 ## Spawner
 
-`spawner/spawner.py` (aiohttp), with its web pages as plain files in
-`spawner/pages/` (edit the text there). A visitor's box is a container
+`spawner/` (aiohttp): `spawner.py` runs the boxes, the routes and the terminal
+proxy; `auth.py` is sign-in, cookies and the bot check; `metrics.py` the
+Prometheus metrics and Grafana's player data; `common.py` the settings, shared
+state and database; `gamedata.py` the gameplay numbers. The web pages are plain
+files in `spawner/pages/` (edit the text there). A visitor's box is a container
 `p-<sid>` launched from `handover` on the `isolated` profile, plus a ttyd on a
 loopback port; the spawner reverse-proxies HTTP **and the terminal WebSocket**
 under `/t/<sid>/`.

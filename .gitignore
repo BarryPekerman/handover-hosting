@@ -49,7 +49,10 @@
 !infra/variables.tf
 !spawner/handover-spawner.service
 !scripts/results.py
+!spawner/auth.py
+!spawner/common.py
 !spawner/gamedata.py
+!spawner/metrics.py
 !spawner/spawner.py
 !spawner/pages/app.html
 !spawner/pages/landing.html

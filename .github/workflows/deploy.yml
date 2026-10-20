@@ -55,7 +55,7 @@ jobs:
 
       - name: Copy spawner
         run: |
-          scp spawner/spawner.py spawner/gamedata.py handover:~/
+          scp spawner/*.py handover:~/
           scp -r spawner/static spawner/pages handover:~/   # images; the web pages
 
       - name: Inject secrets, restart (non-destructive)
