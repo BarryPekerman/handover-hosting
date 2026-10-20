@@ -21,6 +21,10 @@ loopback port; the terminal rides `incus exec` over the control socket, so
 containers reach neither each other, the host, nor the net. Every connection
 joins the box's one tmux session, so devices share a screen.
 
+Split across modules next to this file: common.py (settings, shared state,
+database), auth.py (who a visitor is), metrics.py (Prometheus and Grafana's
+player data), gamedata.py (gameplay numbers), pages/ (the HTML).
+
 Config via env (all optional; secrets come from the EnvironmentFile):
   LISTEN_HOST=127.0.0.1  LISTEN_PORT=8080   PUBLIC_URL=https://play.barrypekerman.com
   BASE_IMAGE=handover    PROFILE=isolated   LOGIN_USER=level0
@@ -34,312 +38,32 @@ Config via env (all optional; secrets come from the EnvironmentFile):
   secrets: TURNSTILE_SECRET, GH_CLIENT_SECRET, SESSION_SECRET (cookie signing)
 """
 import asyncio
-import base64
 import contextlib
-import hashlib
 import hmac
 import html
 import json
-import logging
 import os
 import re
 import secrets
 import shlex
-import sqlite3
 import time
-from aiohttp import web, ClientSession, WSMsgType, ClientTimeout, WSCloseCode
+from aiohttp import web, ClientSession, WSMsgType, WSCloseCode
 
-import gamedata
-
-LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
-LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8080"))
-BASE_IMAGE  = os.environ.get("BASE_IMAGE", "handover")
-PROFILE     = os.environ.get("PROFILE", "isolated")
-MAX_PLAYERS = int(os.environ.get("MAX_PLAYERS", "20"))
-IDLE_SEC    = int(os.environ.get("IDLE_MIN", "60")) * 60
-OUTDATED_IDLE = int(os.environ.get("OUTDATED_IDLE_MIN", "5")) * 60
-MAX_LIFE    = int(os.environ.get("MAX_LIFETIME_MIN", "1440")) * 60
-PORT_BASE   = int(os.environ.get("TTYD_PORT_BASE", "8100"))
-LOGIN_USER  = os.environ.get("LOGIN_USER", "level0")
-COOKIE      = "hid"
-MAX_RESUME  = 20          # highest level a save can resume at
-WIN_INDEX   = 21          # dave's index in the login records: reaching it is the win
-PASS_RE     = re.compile(r"[A-Za-z0-9]{1,64}")
-STATE_FILE  = os.environ.get("STATE_FILE", os.path.expanduser("~/.handover-sessions.json"))
-DB_PATH     = os.environ.get("LEADERBOARD_DB", os.path.expanduser("~/handover-leaderboard.db"))
-RATE_MAX    = int(os.environ.get("RATE_MAX", "5"))       # new containers per IP ...
-RATE_WINDOW = int(os.environ.get("RATE_WINDOW", "600"))  # ... per this many seconds
-# Turnstile (Cloudflare bot check). Sitekey is public; secret lives only on the
-# host (EnvironmentFile), never in git. Verification is enforced only when the
-# secret is present, so the site keeps working until it's placed.
-TS_SITEKEY  = os.environ.get("TURNSTILE_SITEKEY", "")
-TS_SECRET   = os.environ.get("TURNSTILE_SECRET", "")
-TS_ACTION   = os.environ.get("TURNSTILE_ACTION", "play")
-TS_HOSTS    = {h.strip() for h in os.environ.get(
-    "TURNSTILE_HOSTNAMES", "play.barrypekerman.com,barrypekerman.com").split(",") if h.strip()}
-TS_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
-# GitHub OAuth (optional login, for the cross-session leaderboard). Client id is
-# public (unit); secret + session-signing key are host-only (EnvironmentFile).
-PUBLIC_URL       = os.environ.get("PUBLIC_URL", "https://play.barrypekerman.com")
-GH_CLIENT_ID     = os.environ.get("GH_CLIENT_ID", "")
-GH_CLIENT_SECRET = os.environ.get("GH_CLIENT_SECRET", "")
-SESSION_SECRET   = os.environ.get("SESSION_SECRET", "")
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("spawner")
-
-# sid -> {ct, port, proc, created, last}
-sessions: dict[str, dict] = {}
-locks: dict[str, asyncio.Lock] = {}      # per-sid provisioning lock
-states: dict[str, str] = {}              # sid -> "pending"|"full"|"error" (ready == in sessions)
-ip_hits: dict[str, list] = {}            # client IP -> recent provision timestamps (throttle)
-who: dict[str, dict] = {}                # sid -> {"uid": <github id>|None, "display": str}
-                                         # (a signed-in player's box follows the account)
-live_ws: set = set()                     # open terminal WebSockets, closed on shutdown
-resume_req: dict[str, tuple] = {}        # sid -> (saved {level: pass}, server-known level, note)
-live_image = ""                          # fingerprint BASE_IMAGE points at now
-background: set = set()                  # running provision tasks (asyncio keeps only weak refs)
-pids: dict[str, str] = {}                # sid -> player id (random; ties one player's boxes together)
-box_pid: dict[str, str] = {}             # container -> player id, for event rows (kept after teardown)
-PID_RE = re.compile(r"[0-9a-f]{32}")
-
-# ---------- metrics: Prometheus text format on a localhost-only port ----------
-# Scraped by the OKE Prometheus through the tunnel route handover-metrics (Access
-# service token). Counters reset when the spawner restarts; Prometheus handles that.
-METRICS_PORT = int(os.environ.get("METRICS_PORT", "9101"))
-SOLVE_BUCKETS = (60, 180, 300, 600, 1200, 1800, 3600, 7200, 14400)  # seconds
-SOLVE_CAP = 14400        # longer is a player who walked away: kept in events, not in the histogram
-# Commands counted by name in the metrics; anything else is "other" (the
-# events table keeps every line). Bounded so a player can't explode the series;
-# shell aliases like ll count by their own name.
-TRACKED_CMDS = frozenset("""
-    ls cd cat less more head tail grep find file strings xxd od hexdump base64
-    openssl gpg tar gzip zcat unzip bzip2 xz diff sort uniq wc cut tr awk sed
-    vim vi nano man mail su ssh go sudo id whoami groups getfacl setfacl chmod
-    stat ps top kill pkill pgrep systemctl journalctl crontab at env export
-    echo printf history clear exit git python3 curl wget nc ss lsof sqlite3 jq
-    tmux tree pwd cp mv rm mkdir touch ln readlink which type alias help
-    ll la l dir egrep fgrep nl rev tac xargs tee watch sleep date hostname
-    du df free uptime w who last lastlog getent locate apropos whatis info
-    netstat ip ping nmap telnet scp sftp openssl sha256sum md5sum stat
-    chown chgrp umask unset set source exec fg bg jobs nohup timeout
-    systemd-run sudoedit visudo journalctl dmesg lsblk mount findmnt
-""".split())
-counters: dict[tuple, float] = {}        # (name, sorted label items) -> value
-solve_hist: dict[int, list] = {}         # level -> per-bucket counts + [+Inf count, sum]
-
-
-def inc(name: str, n: float = 1, **labels):
-    key = (name, tuple(sorted((k, str(v)) for k, v in labels.items())))
-    counters[key] = counters.get(key, 0) + n
-
-
-def init_counters():
-    """Every series with a known label set starts at 0, so a quiet game reads 0
-    on the dashboard instead of "No data" (and increase() sees the first event)."""
-    zero = [("handover_level_reached_total", {"level": i}) for i in range(WIN_INDEX + 1)]
-    zero += [("handover_level_solve_capped_total", {"level": i}) for i in range(WIN_INDEX)]
-    zero += [("handover_finishes_total", {"ranked": r}) for r in ("true", "false")]
-    zero += [("handover_resumes_total", {"outcome": o}) for o in ("resumed", "no_match", "nothing_saved")]
-    zero += [("handover_box_starts_total", {"result": r}) for r in ("ready", "full", "error")]
-    zero += [("handover_teardowns_total", {"reason": r})
-             for r in ("idle", "max-lifetime", "outdated-idle", "upgrade")]
-    zero += [("handover_errors_total", {})]
-    zero += [("handover_wrong_passwords_total", {"level": i}) for i in range(WIN_INDEX)]
-    for name, labels in zero:
-        inc(name, 0, **labels)
-
-
-class CountErrors(logging.Handler):
-    """Every ERROR the spawner logs (incl. log.exception) counts in
-    handover_errors_total; the journal has the detail."""
-
-    def __init__(self):
-        super().__init__(logging.ERROR)
-
-    def emit(self, record):
-        inc("handover_errors_total")
-
-
-log.addHandler(CountErrors())
-
-
-def observe_solve(level: int, secs: float):
-    h = solve_hist.setdefault(level, [0] * len(SOLVE_BUCKETS) + [0, 0.0])
-    for i, b in enumerate(SOLVE_BUCKETS):
-        if secs <= b:
-            h[i] += 1
-    h[-2] += 1
-    h[-1] += secs
-
-
-def count_progress(s: dict, reaches: dict[int, int]):
-    """Count each level a box reaches once (the funnel), and the time spent on
-    the level before it, when that level was played in this box. Every reach
-    is also an event row with its real time."""
-    counted = s.setdefault("counted", [])
-    rows = []
-    for idx in sorted(reaches):
-        if idx in counted:
-            continue
-        counted.append(idx)
-        rows.append((reaches[idx], s.get("ct", ""), "reach", idx, ""))
-        inc("handover_level_reached_total", level=idx)
-        if idx - 1 in reaches and idx - 1 >= s.get("start", 0):
-            secs = max(0, reaches[idx] - reaches[idx - 1])
-            if secs <= SOLVE_CAP:
-                observe_solve(idx - 1, secs)
-            else:
-                inc("handover_level_solve_capped_total", level=idx - 1)
-        if idx == WIN_INDEX:
-            ranked = s.get("start", 0) == 0 and all(i in reaches for i in range(WIN_INDEX + 1))
-            inc("handover_finishes_total", ranked=str(ranked).lower())
-            rows.append((reaches[idx], s.get("ct", ""), "finish", idx, "ranked" if ranked else "unranked"))
-    events(rows)
-
-
-def cmd_name(line: str) -> str:
-    """The command a line runs, for the bounded metrics label: first word, path stripped."""
-    word = line.split(maxsplit=1)[0] if line.strip() else ""
-    word = word.rsplit("/", 1)[-1]
-    return word if word in TRACKED_CMDS else "other"
-
-
-def count_commands(s: dict, found: list[tuple]):
-    """found: (epoch, level, kind, detail, status) read from the box's journal.
-    kind "cmd": detail is the command line as typed, status its exit code (None
-    from images that logged names only). kind "badpass": a wrong password for
-    the account in detail, counted against the level the player is on."""
-    for _, lvl, kind, detail, _ in found:
-        if kind == "cmd":
-            inc("handover_commands_total", level=lvl, cmd=cmd_name(detail))
-        else:
-            inc("handover_wrong_passwords_total", level=lvl)
-    events([(t, s.get("ct", ""), kind, lvl, detail, status) for t, lvl, kind, detail, status in found])
-
-
-def _labels(items) -> str:
-    return "{" + ",".join(f'{k}="{v}"' for k, v in items) + "}" if items else ""
-
-
-def render_metrics() -> str:
-    out = [
-        "# TYPE handover_players gauge", f"handover_players {len(sessions)}",
-        "# TYPE handover_seats gauge", f"handover_seats {MAX_PLAYERS}",
-        "# TYPE handover_starting gauge",
-        f"handover_starting {sum(1 for v in states.values() if v == 'pending')}",
-        "# TYPE handover_info gauge", f'handover_info{{image="{live_image[:12]}"}} 1',
-        "# TYPE handover_player_level gauge",
-    ]
-    at = {}
-    for x in sessions.values():
-        lvl = max(x.get("counted") or [x.get("start", 0)])
-        at[lvl] = at.get(lvl, 0) + 1
-    out += [f'handover_player_level{{level="{lvl}"}} {n}' for lvl, n in sorted(at.items())]
-    for name in sorted({k[0] for k in counters}):
-        out.append(f"# TYPE {name} counter")
-        out += [f"{name}{_labels(items)} {v:g}" for (n, items), v in sorted(counters.items()) if n == name]
-    out.append("# TYPE handover_level_solve_seconds histogram")
-    for lvl, h in sorted(solve_hist.items()):
-        for b, c in zip(SOLVE_BUCKETS, h, strict=False):
-            out.append(f'handover_level_solve_seconds_bucket{{level="{lvl}",le="{b}"}} {c}')
-        out.append(f'handover_level_solve_seconds_bucket{{level="{lvl}",le="+Inf"}} {h[-2]}')
-        out.append(f'handover_level_solve_seconds_count{{level="{lvl}"}} {h[-2]}')
-        out.append(f'handover_level_solve_seconds_sum{{level="{lvl}"}} {h[-1]:g}')
-    return "\n".join(out) + "\n"
-
-
-async def h_metrics(request):
-    return web.Response(text=render_metrics(), content_type="text/plain")
-
-
-# ---------- player data for Grafana (metrics port only) ----------
-# The raw per-player view for the operator while the game runs: Grafana's
-# Infinity datasource reads these through the handover-metrics tunnel route,
-# which only the oke-prometheus Access token passes. Never on the play port.
-
-def _data(fn):
-    c = db()
-    try:
-        return fn(c)
-    finally:
-        c.close()
-
-
-async def h_data_players(request):
-    rows = await asyncio.to_thread(_data, lambda c: gamedata.Game(gamedata.load(c)).players())
-    return web.json_response(rows)
-
-
-async def h_data_levels(request):
-    rows = await asyncio.to_thread(_data, lambda c: gamedata.Game(gamedata.load(c)).levels())
-    return web.json_response(rows)
-
-
-async def h_data_player(request):
-    pid = request.query.get("pid", "")
-    if not PID_RE.fullmatch(pid):
-        return web.json_response([])
-    return web.json_response(await asyncio.to_thread(_data, lambda c: gamedata.timeline(c, pid)))
-
-
-def make_metrics_app():
-    mapp = web.Application()
-    mapp.router.add_get("/metrics", h_metrics)
-    mapp.router.add_get("/data/players", h_data_players)
-    mapp.router.add_get("/data/levels", h_data_levels)
-    mapp.router.add_get("/data/player", h_data_player)
-    return mapp
-
-
-def db():
-    c = sqlite3.connect(DB_PATH)
-    # key = GitHub uid for logged-in players (persists across sessions), or
-    # "anon:<sid>" for anonymous players (single-session). accumulated = sum of
-    # each level's solve time, counted once.
-    c.execute("CREATE TABLE IF NOT EXISTS players "
-              "(key TEXT PRIMARY KEY, display TEXT, max_level INTEGER, "
-              " accumulated INTEGER, finished INTEGER, updated REAL)")
-    # unranked = resumed past the levels this key actually played, so its total
-    # is missing time and it stays off the leaderboard.
-    if "unranked" not in {r[1] for r in c.execute("PRAGMA table_info(players)")}:
-        c.execute("ALTER TABLE players ADD COLUMN unranked INTEGER DEFAULT 0")
-    # Raw game events for analytics (later: Postgres). box = container name;
-    # no player identity. kind: start, resume, reach, finish, end, cmd.
-    c.execute("CREATE TABLE IF NOT EXISTS events "
-              "(ts INTEGER, box TEXT, kind TEXT, level INTEGER, detail TEXT)")
-    # pid = random player id (cookie; the same across resumes and, signed in,
-    # across devices). status = a command's exit code. Announced on the landing
-    # and story pages; published only as totals after the game closes.
-    have = {r[1] for r in c.execute("PRAGMA table_info(events)")}
-    for col, typ in (("pid", "TEXT"), ("status", "INTEGER")):
-        if col not in have:
-            c.execute(f"ALTER TABLE events ADD COLUMN {col} {typ}")
-    c.execute("CREATE TABLE IF NOT EXISTS player_ids (uid TEXT PRIMARY KEY, pid TEXT)")
-    return c
-
-
-def events(rows: list[tuple]):
-    """Append (ts, box, kind, level, detail[, status]) rows, tagged with the
-    box's player id; analytics never break play."""
-    if not rows:
-        return
-    rows = [(*r[:5], r[5] if len(r) > 5 else None, box_pid.get(r[1])) for r in rows]
-    try:
-        c = db()
-        c.executemany("INSERT INTO events(ts,box,kind,level,detail,status,pid) VALUES(?,?,?,?,?,?,?)", rows)
-        c.commit()
-        c.close()
-    except Exception:
-        log.exception("events write failed")
-
-
-def player_row(key):
-    c = db()
-    row = c.execute("SELECT max_level, accumulated, finished FROM players WHERE key=?",
-                    (key,)).fetchone()
-    c.close()
-    return row  # (max_level, accumulated, finished) or None
+import common
+from common import (
+    BASE_IMAGE, IDLE_SEC, LISTEN_HOST, LISTEN_PORT, LOGIN_USER, MAX_LIFE, MAX_PLAYERS,
+    MAX_RESUME, OUTDATED_IDLE, PASS_RE, PORT_BASE, PROFILE, PUBLIC_URL, STATE_FILE,
+    WIN_INDEX, background, box_pid, db, events, live_ws, locks, log, pids, player_row,
+    resume_req, sessions, states, who,
+)
+from metrics import (
+    METRICS_PORT, count_commands, count_progress, inc, init_counters, make_metrics_app,
+)
+from auth import (
+    TS_ACTION, TS_SECRET, TS_SITEKEY, client_ip, h_callback, h_login, h_logout, identity,
+    oauth_ready, owns, player_id, remember, resolve_sid, throttled, verify_turnstile,
+    with_cookie, with_pid,
+)
 
 
 # Runs INSIDE a player container via `incus exec ... bash`. The box is
@@ -568,113 +292,12 @@ async def sweep_orphans():
             await run("incus", "delete", "-f", name)
 
 
-def client_ip(request) -> str:
-    # behind Cloudflare the real client is in CF-Connecting-IP; fall back sanely
-    return (request.headers.get("CF-Connecting-IP")
-            or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            or request.remote or "?")
-
-
-def _sign(payload: dict) -> str:
-    raw = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
-    sig = hmac.new(SESSION_SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()
-    return raw + "." + sig
-
-
-def _unsign(token: str):
-    try:
-        raw, sig = token.rsplit(".", 1)
-        good = hmac.new(SESSION_SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, good):
-            return None
-        return json.loads(base64.urlsafe_b64decode(raw.encode()))
-    except Exception:
-        return None
-
-
-def identity(request):
-    """(uid, display) from the signed ghid cookie, or (None, 'anonymous')."""
-    if not SESSION_SECRET:
-        return (None, "anonymous")
-    tok = request.cookies.get("ghid")
-    p = _unsign(tok) if tok else None
-    if not p:
-        return (None, "anonymous")
-    return (str(p.get("uid")), "@" + str(p.get("login", "?")))
-
-
-def account_sid(uid) -> str | None:
-    """The live (or still provisioning) box owned by GitHub account `uid`."""
-    for sid, w in who.items():
-        if w.get("uid") == uid and (sid in sessions or states.get(sid) == "pending"):
-            return sid
-    return None
-
-
-def resolve_sid(request) -> str | None:
-    """This visitor's box. Signed in: the account's box, from any device; else
-    the cookie's box, which a signed-in player claims if it's anonymous (never
-    another account's). Anonymous: the cookie's box."""
-    uid, _ = identity(request)
-    cookie = request.cookies.get(COOKIE)
-    if uid:
-        mine = account_sid(uid)
-        if mine:
-            return mine
-        if cookie and who.get(cookie, {}).get("uid") not in (None, uid):
-            return None
-    return cookie
-
-
-def remember(sid: str, uid, display: str):
-    """Record who a box belongs to. Signing out never downgrades an account's box."""
-    if uid or who.get(sid, {}).get("uid") is None:
-        who[sid] = {"uid": uid, "display": display}
-
-
-def player_id(request, uid) -> str:
-    """The player's random id: the account's (so devices agree), else this
-    browser's cookie, else a new one. Never derived from anything about them."""
-    if uid:
-        c = db()
-        row = c.execute("SELECT pid FROM player_ids WHERE uid=?", (str(uid),)).fetchone()
-        if not row:
-            pid = request.cookies.get("pid", "")
-            pid = pid if PID_RE.fullmatch(pid) else secrets.token_hex(16)
-            c.execute("INSERT INTO player_ids(uid, pid) VALUES(?,?)", (str(uid), pid))
-            c.commit()
-            row = (pid,)
-        c.close()
-        return row[0]
-    pid = request.cookies.get("pid", "")
-    return pid if PID_RE.fullmatch(pid) else secrets.token_hex(16)
-
-
-def with_pid(resp, pid: str):
-    resp.set_cookie("pid", pid, httponly=True, samesite="Lax", path="/", max_age=365 * 86400)
-    return resp
-
-
-def with_cookie(resp, sid: str):
-    resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", path="/", max_age=MAX_LIFE)
-    return resp
-
 
 def spinner(sid: str):
     """The "spinning up" page, which polls /ready and then opens the terminal."""
     return with_cookie(web.Response(text=SPAWNING.replace("__SID__", sid),
                                     content_type="text/html"), sid)
 
-
-def throttled(ip: str) -> bool:
-    """True if this IP has started too many containers lately (records a hit if not)."""
-    now = time.time()
-    q = ip_hits.setdefault(ip, [])
-    q[:] = [t for t in q if now - t < RATE_WINDOW]
-    if len(q) >= RATE_MAX:
-        return True
-    q.append(now)
-    return False
 
 
 async def run(*args) -> tuple[int, str]:
@@ -723,7 +346,7 @@ async def container_image(ct: str) -> str:
 def outdated(s: dict) -> bool:
     """True once the image this session's container came from is no longer the
     live one (an image deploy moved the alias)."""
-    return bool(live_image and s.get("image") and s["image"] != live_image)
+    return bool(common.live_image and s.get("image") and s["image"] != common.live_image)
 
 
 def reached_level(s: dict) -> int:
@@ -865,11 +488,10 @@ async def teardown(sid: str, reason: str = ""):
 
 
 async def reaper(app):
-    global live_image
     try:
         while True:
             await asyncio.sleep(30)
-            live_image = await image_fingerprint(BASE_IMAGE) or live_image
+            common.live_image = await image_fingerprint(BASE_IMAGE) or common.live_image
             await record_finishers()      # capture victories before reaping
             await sweep_orphans()         # GC containers nobody is tracking
             now = time.time()
@@ -981,29 +603,6 @@ def server_level(uid) -> int:
     return min(row[0], MAX_RESUME) if row and row[0] else 0
 
 
-async def verify_turnstile(token: str, ip: str) -> bool:
-    """Server-side Turnstile check. No secret configured -> don't block (lets the
-    site run before the secret is placed). Token is single-use."""
-    if not TS_SECRET:
-        return True
-    if not token:
-        return False
-    body = {"secret": TS_SECRET, "response": token, "remoteip": ip}
-    try:
-        async with ClientSession() as cs:
-            async with cs.post(TS_VERIFY_URL, data=body, timeout=ClientTimeout(total=10)) as r:
-                j = await r.json()
-    except Exception:
-        log.exception("turnstile siteverify error")
-        return False
-    ok = (bool(j.get("success"))
-          and j.get("action") == TS_ACTION
-          and (not TS_HOSTS or j.get("hostname") in TS_HOSTS))
-    if not ok:
-        log.warning("turnstile reject: %s",
-                    {k: j.get(k) for k in ("success", "action", "hostname", "error-codes")})
-    return ok
-
 
 async def h_play(request):
     """POST only: find-or-create this visitor's container. A GET can never spawn
@@ -1065,17 +664,6 @@ async def h_ready(request):
         return web.json_response({"state": "ready"})
     return web.json_response({"state": states.get(sid, "pending")})
 
-
-def owns(request, sid: str) -> bool:
-    """True if this request carries the session cookie for `sid`, or is signed
-    in to the GitHub account that owns it. The sid is also in the URL, so this
-    binds a terminal to its owner: a leaked /app/<sid> or /t/<sid>/ URL is
-    useless without the matching httponly `hid` cookie or account."""
-    uid = identity(request)[0]
-    owner = who.get(sid, {}).get("uid")
-    if uid and owner and uid != owner:   # signed in as someone else: never theirs
-        return False
-    return request.cookies.get(COOKIE) == sid or (bool(uid) and uid == owner)
 
 
 async def h_app(request):
@@ -1193,60 +781,6 @@ async def h_leaderboard(request):
     return web.Response(text=LEADERBOARD.replace("__ROWS__", body), content_type="text/html")
 
 
-def oauth_ready() -> bool:
-    return bool(GH_CLIENT_ID and GH_CLIENT_SECRET and SESSION_SECRET)
-
-
-async def h_login(request):
-    if not oauth_ready():
-        return web.HTTPFound("/")
-    state = secrets.token_urlsafe(16)
-    url = ("https://github.com/login/oauth/authorize"
-           f"?client_id={GH_CLIENT_ID}&redirect_uri={PUBLIC_URL}/auth/callback"
-           f"&scope=read:user&state={state}")
-    resp = web.HTTPFound(url)
-    resp.set_cookie("oauth_state", state, httponly=True, samesite="Lax", max_age=600, path="/")
-    return resp
-
-
-async def h_callback(request):
-    code = request.query.get("code", "")
-    state = request.query.get("state", "")
-    if not oauth_ready() or not code or not state or state != request.cookies.get("oauth_state"):
-        return web.HTTPFound("/")
-    try:
-        async with ClientSession() as cs:
-            async with cs.post("https://github.com/login/oauth/access_token",
-                               headers={"Accept": "application/json"},
-                               data={"client_id": GH_CLIENT_ID, "client_secret": GH_CLIENT_SECRET,
-                                     "code": code, "redirect_uri": f"{PUBLIC_URL}/auth/callback"},
-                               timeout=ClientTimeout(total=10)) as r:
-                tok = (await r.json()).get("access_token")
-            if not tok:
-                return web.HTTPFound("/")
-            async with cs.get("https://api.github.com/user",
-                              headers={"Authorization": f"Bearer {tok}", "User-Agent": "handover",
-                                       "Accept": "application/vnd.github+json"},
-                              timeout=ClientTimeout(total=10)) as r:
-                u = await r.json()
-    except Exception:
-        log.exception("github oauth error")
-        return web.HTTPFound("/")
-    if not u.get("id") or not u.get("login"):
-        return web.HTTPFound("/")
-    resp = web.HTTPFound("/")
-    resp.set_cookie("ghid", _sign({"uid": u["id"], "login": u["login"]}),
-                    httponly=True, samesite="Lax", secure=True, max_age=MAX_LIFE, path="/")
-    resp.del_cookie("oauth_state", path="/")
-    return resp
-
-
-async def h_logout(request):
-    resp = web.HTTPFound("/")
-    resp.del_cookie("ghid", path="/")
-    resp.del_cookie(COOKIE, path="/")   # the box stays with the account, not this device
-    return resp
-
 
 async def h_health(request):
     return web.json_response({"players": len(sessions), "max": MAX_PLAYERS})
@@ -1264,8 +798,7 @@ async def on_start(app):
             data = json.load(f)
     except Exception:
         data = {}
-    global live_image
-    live_image = await image_fingerprint(BASE_IMAGE)
+    common.live_image = await image_fingerprint(BASE_IMAGE)
     for sid, s in data.items():
         rc, _ = await run("incus", "exec", s["ct"], "--", "true")
         if rc != 0:
