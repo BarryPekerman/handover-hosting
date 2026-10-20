@@ -5,7 +5,8 @@
 | `make test` | ruff + unit tests with coverage (what CI runs) | seconds |
 | `make mutate` | plants known bugs one at a time; the unit tests must catch each | ~1 min |
 | `make e2e` | the real spawner, ttyd and tmux against the Vagrant game VM | ~1 min |
-| `scripts/capacity.sh` | on the host: how many boxes it holds (see below) | ~10 min |
+| `scripts/capacity.sh` | on the host: how many boxes it holds (see below) | ~20 min |
+| `scripts/footprint.sh` | on the host: one box's memory and disk over a whole game | ~2 min |
 
 All three build their own `.venv` on first use.
 
@@ -91,13 +92,20 @@ hanging; there are no fixed sleeps.
 ## Capacity (`scripts/capacity.sh`, on the host)
 
 Starts `load-N` boxes from the live image on the players' profile, in bursts
-of 10 up to 40, each with a player logged in through tmux the way ttyd does it,
+of 10 (up to 60 by default), each with a player logged in through tmux the way ttyd does it,
 and records how long they took to come up, memory, pool use and how fast the
 spawner still answers; then every box searches the filesystem at once. The
 boxes never go through the spawner, so nothing reaches the leaderboard or the
 analytics. It refuses to start while anyone plays, stops if a player arrives or
 memory runs low, and deletes every load box on exit.
 
-    scp scripts/capacity.sh handover: && ssh handover 'bash capacity.sh 40 </dev/null'
+    scp scripts/capacity.sh handover: && ssh handover 'bash capacity.sh 60 </dev/null'
 
-Results from 20 October 2026 are in `docs/ops-notes.md` (Capacity).
+**`scripts/footprint.sh`** plays the whole game in one box (each level's
+intended solution from bandit-wannabe's `solve.sh`, run as that level's user)
+and reports its memory peak, what the memory is, whether anything was killed,
+and the disk it wrote. `MEM=256MiB` tries a tighter limit on that box only.
+Usage is at the top of the script.
+
+Results from 20 October 2026, and why the limit is 60 players, are in
+`docs/ops-notes.md` (Capacity).

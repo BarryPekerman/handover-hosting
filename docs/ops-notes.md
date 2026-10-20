@@ -34,10 +34,10 @@ top. Not player-facing.
   `ExecStart=/home/ubuntu/spawner.py`). One per-player **Incus** container
   (`p-<sid12>`) + its own loopback **ttyd**, reverse-proxied at `/t/<sid>/`.
 - **Per-player container:** clone of the golden image `handover` on the
-  `isolated` profile — no NIC, `security.guestapi=false`, CPU 50% / mem 512 MiB
-  / procs 300, **1.5 GiB btrfs disk quota** (counts the shared ~0.95 GiB base
-  image, so ~560 MiB writable; pool `games`, 30 GiB loop ceiling),
-  own uid range per box (`security.idmap.isolated`). Up to **40 players**
+  `isolated` profile — no NIC, `security.guestapi=false`, CPU 50% / mem 320 MiB
+  / procs 300, **1400 MiB btrfs disk quota** (counts the shared ~0.95 GiB base
+  image, so ~420 MiB writable; pool `games`, 30 GiB loop ceiling),
+  own uid range per box (`security.idmap.isolated`). Up to **60 players**
   (`MAX_PLAYERS`); measured idle box: 1.4% of a core, 138 MiB RAM, 46 MiB disk.
 - **Code:** hosting (spawner, cloudflared, infra/terraform, this doc) lives in
   **`handover-hosting`**; the game itself lives in **`bandit-wannabe`**, whose CI
@@ -81,7 +81,7 @@ compartment `handover`). Host config is `host/site.yml`, applied by
 ssh handover                                          # get on the box (tunnel)
 
 # health / who's playing
-curl -s 127.0.0.1:8080/healthz                        # {"players":N,"max":40}
+curl -s 127.0.0.1:8080/healthz                        # {"players":N,"max":60}
 curl -s 127.0.0.1:9101/metrics                        # what Prometheus sees
 incus list -c ns -f compact                           # live containers
 cat ~/.handover-sessions.json | python3 -m json.tool  # sid -> container/port
@@ -122,41 +122,68 @@ Host setup changes go in `host/site.yml` (Ansible), never by hand: `deploy.yml`
 applies it on every deploy. Dry run from a laptop:
 `ansible-playbook -i handover, host/site.yml --check --diff`.
 
-## Capacity (measured 2026-10-20)
+## Capacity: 60 players (measured 2026-10-20)
 
-`scripts/capacity.sh` on the live host (4 cores, 23.4 GiB, no swap), 40 boxes
-in bursts of 10, each with a player logged in through tmux:
+`MAX_PLAYERS=60` is the limit from now on. The rule behind it: even if every
+player deliberately fills their box to its limits, the host (23.4 GiB, no swap,
+4 cores) can't run out of memory or disk. If it ran out of memory the kernel
+would start killing processes, the spawner among them, and everyone would be
+dropped. So the per-box limits are sized for 60:
 
-| boxes | slowest to be ready | of which booting | free memory | boxes' memory | pool | load (1 min) |
-|---|---|---|---|---|---|---|
-| 10 | 160 s | 8 s | 22.1 GiB | 1.5 GiB | 4.0 GiB | 7.9 |
-| 20 | 121 s | 6 s | 21.3 GiB | 3.0 GiB | 3.7 GiB | 8.9 |
-| 30 | 97 s | 6 s | 20.5 GiB | 4.5 GiB | 4.5 GiB | 9.8 |
-| 40 | 131 s | 7 s | 19.7 GiB | 6.1 GiB | 5.4 GiB | 20.8 |
+| | per box | 60 boxes at the limit | measured (whole game in one box) |
+|---|---|---|---|
+| memory (`limits.memory`) | 320 MiB | 18.75 GiB of 23.4 | peak 231 MiB when squeezed to 256 MiB, nothing killed |
+| disk (quota 1400 MiB, incl. the ~0.95 GiB image) | ~420 MiB writable | ~26 GiB of the 30 GiB pool | 93 MiB written |
 
-All 40 boxes searching the filesystem at once took 6 s; the spawner answered
-`/healthz` within 22 ms throughout.
+**One box, the whole game** (`scripts/footprint.sh`: every level's intended
+solution run as that level's user, 20/20 solved):
+- Booted: 135 MiB; with a player logged in through tmux: 155 MiB.
+- Each `su - levelN` leaves a `systemd --user` manager behind (~13 MiB each
+  with its helper), so memory climbs by level: at the old 512 MiB limit it
+  ended at 444 MiB, but 256 MiB of that was file cache the kernel can drop.
+  Real memory was ~154 MiB (anon 92 + kernel 62).
+- Squeezed to 256 MiB: still 20/20, peak 231 MiB, `oom_kill 0`, but the
+  kernel freed cache 428 times (`memory.events high`). Too tight to be the
+  limit; 320 MiB leaves ~90 MiB over that peak.
 
-- **Memory isn't the limit.** About 85 MiB per box with a player in it; 40
-  boxes leave 19.7 GiB free. Even all 40 at their 512 MiB limit (20 GiB) fits
-  in 23.4 GiB, just. `MAX_PLAYERS=40` stays.
-- **Starting boxes is.** Boxes are created one at a time (`LAUNCH_LOCK`,
-  below), about 4.5 s each on a quiet host, then boot in parallel (~2 s). So
-  the Nth player of a burst waits about 4.5 x N s: 8 at once were all ready in
-  37 s (measured with the spawner's polling). It's slower when the host is
-  busy: right after many boxes were deleted (btrfs cleans them up in the
-  background) one create took 7-15 s, and with 30-40 boxes running the 10th of
-  a burst waited up to ~2 min in the test above. Nobody fails; the spinner
-  waits. Per-box uid ranges aren't the cost: a box without one
-  (`security.idmap.isolated=false`) was no faster (4.8 s vs 4.5 s), as Incus
-  re-owns the image's files either way. What would help is keeping a few
-  boxes started ahead of time (not built).
-- The run shows on the Grafana host panels (node-exporter) between 11:55 and
-  12:35 UTC on 2026-10-20; nothing reached the leaderboard or the player
-  metrics.
+**Many boxes** (`scripts/capacity.sh`, at the old 512 MiB profile; boxes in
+bursts of 10, each with a player logged in through tmux). The run was aimed
+at 80 and stopped at 66 once 60 was decided:
 
-Rerun after any change to the profile, the image size or the host shape,
-while nobody plays (it refuses otherwise): see `tests/README.md`.
+| boxes | slowest to be ready | of which booting | free memory | boxes' memory | pool | load (1 min) | spawner |
+|---|---|---|---|---|---|---|---|
+| 10 | 48 s | 4 s | 21.5 GiB | 1.5 GiB | 2.7 GiB | 2.4 | 1.0 ms |
+| 20 | 68 s | 5 s | 20.8 GiB | 3.0 GiB | 3.7 GiB | 8.0 | 1.0 ms |
+| 30 | 97 s | 6 s | 20.0 GiB | 4.5 GiB | 4.5 GiB | 12.3 | 1.1 ms |
+| 40 | 128 s | 7 s | 19.2 GiB | 6.0 GiB | 5.3 GiB | 25.7 | 0.9 ms |
+| 50 | 165 s | 11 s | 18.4 GiB | 7.5 GiB | 6.3 GiB | 34.6 | 0.9 ms |
+| 60 | 206 s | 11 s | 17.5 GiB | 9.0 GiB | 7.1 GiB | 37.7 | 1.5 ms |
+
+An earlier run to 40: all 40 boxes searching the filesystem at once took 6 s,
+and the spawner answered `/healthz` within 22 ms throughout.
+
+- **Memory and disk aren't the limit:** about 150 MiB and 50-90 MiB per box in
+  use; the profile limits are what cap it at 60.
+- **CPU is fine for playing** (an idle box: 1.4% of a core) but **starting
+  boxes is slow**. Boxes are created one at a time (`LAUNCH_LOCK`, below),
+  about 4.5 s each on a quiet host, then boot in parallel (2-11 s). So the
+  Nth player of a burst waits about 4.5 x N s: 8 at once were all ready in
+  37 s. It's slower when the host is busy: right after many boxes were
+  deleted (btrfs cleans them up in the background) one create took 7-15 s,
+  and with 50-60 boxes running the 10th of a burst waited ~3 min (table).
+  Nobody fails; the spinner waits. Per-box uid ranges aren't the cost: a box
+  without one (`security.idmap.isolated=false`) was no faster (4.8 s vs
+  4.5 s), as Incus re-owns the image's files either way. What would help is
+  keeping a few boxes started ahead of time (not built).
+- 80 would fit at 256 MiB per box, but that's the squeezed case above: a
+  player opening more than the game needs could get processes in their own
+  box killed.
+- The runs show on the Grafana host panels (node-exporter) on 2026-10-20,
+  11:55-12:35 and 14:25-15:05 UTC; nothing reached the leaderboard or the
+  player metrics.
+
+Rerun both after any change to the profile, the image size or the host
+shape, while nobody plays (they refuse otherwise): see `tests/README.md`.
 
 ## Reboots
 
@@ -257,9 +284,9 @@ When the game closes:
 ## Hardening posture (break-tested)
 
 Strong: unprivileged containers, no network device (no egress, no cloud
-metadata), guest API off, fork-bomb/mem-bomb contained by cgroup limits, a 1.5 GiB
+metadata), guest API off, fork-bomb/mem-bomb contained by cgroup limits, a 1400 MiB
 disk quota caps fill, 30 GiB pool is the host ceiling. Spawning gated by
-Cloudflare Turnstile + per-IP rate limit (5/10 min) + hard 40-seat cap.
+Cloudflare Turnstile + per-IP rate limit (5/10 min) + hard 60-seat cap.
 No inbound ports at all: SSH only through the tunnel behind Cloudflare Access,
 key-only. (fail2ban still runs but sees only tunnel traffic from localhost,
 which it ignores.)
@@ -283,6 +310,8 @@ which it ignores.)
 
 ## Change log
 
+- **2026-10-20:** limit raised to **60 players**: `MAX_PLAYERS=60`, box
+  memory 512 -> 320 MiB, disk quota 1536 -> 1400 MiB (Capacity, above).
 - **2026-10-20:** capacity measured (above); box creation serialised host-wide
   (`LAUNCH_LOCK`) after the test found Incus's uid-range race; CI runs
   `make mutate`; the browser save has tests; e2e waits have limits.

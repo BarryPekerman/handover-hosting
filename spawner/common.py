@@ -20,7 +20,7 @@ PROFILE     = os.environ.get("PROFILE", "isolated")
 # at once: with security.idmap.isolated it can hand out a uid range outside
 # root's subuid range (the box fails to start) or one another box already has.
 LAUNCH_LOCK = os.environ.get("LAUNCH_LOCK", "/run/lock/handover-launch")
-MAX_PLAYERS = int(os.environ.get("MAX_PLAYERS", "20"))
+MAX_PLAYERS = int(os.environ.get("MAX_PLAYERS", "60"))
 IDLE_SEC    = int(os.environ.get("IDLE_MIN", "60")) * 60
 OUTDATED_IDLE = int(os.environ.get("OUTDATED_IDLE_MIN", "5")) * 60
 MAX_LIFE    = int(os.environ.get("MAX_LIFETIME_MIN", "1440")) * 60
