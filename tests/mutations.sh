@@ -45,5 +45,21 @@ m spawner/spawner.py 'return min(row[0], MAX_RESUME) if row and row[0] else 0' '
 m spawner/common.py '    except Exception:
         log.exception("events write failed")' '    finally:
         pass' "a database error breaks play"
+# leaderboard scoring
+m spawner/spawner.py 'unranked=MAX(COALESCE(players.unranked,0), excluded.unranked)' 'unranked=excluded.unranked' "a later clean poll clears unranked"
+m spawner/spawner.py 'WHERE finished=1 AND COALESCE(unranked,0)=0' 'WHERE finished=1' "unranked runs on the leaderboard"
+m spawner/spawner.py 'ORDER BY accumulated ASC' 'ORDER BY accumulated DESC' "leaderboard slowest first"
+m spawner/spawner.py '{html.escape(d)}' '{d}' "player names not escaped on the leaderboard"
+m spawner/spawner.py 'added = solve_time(reaches, prev_max, new_max)' 'added = solve_time(reaches, 0, new_max)' "solved levels' time added again every poll"
+m spawner/spawner.py 'resumed_past = s is not None and s.get("start", 0) > prev_max' 'resumed_past = False' "resumed runs ranked on the leaderboard"
+m spawner/spawner.py 'finished = 1 if new_max >= WIN_INDEX else finished' 'finished = finished' "reaching dave doesn't finish"
+# who gets a box, whose terminal
+m spawner/spawner.py 'web.get("/play", h_play_get)' 'web.get("/play", h_play)' "a GET starts a box"
+m spawner/spawner.py '    if throttled(ip):' '    if False:' "no per-IP limit on new boxes"
+m spawner/spawner.py 'if not await verify_turnstile(' 'if False and not await verify_turnstile(' "bot check result ignored"
+m spawner/spawner.py 'if not owns(request, sid):       # not your session' 'if False:' "anyone opens any terminal"
+m spawner/spawner.py 'if not s or not owns(request, sid):' 'if not s:' "anyone reads any save's passwords"
+m spawner/spawner.py 'headers={"Cache-Control": "no-store"}' 'headers={}' "saved passwords cacheable"
+m spawner/spawner.py 'resume_req[sid] = ({}, lvl,' 'resume_req[sid] = ({}, 0,' "an image update sends players back to level 0"
 echo; [ "$survived" -eq 0 ] && echo "every planted bug was caught" || echo "$survived bug(s) not caught"
 exit "$survived"

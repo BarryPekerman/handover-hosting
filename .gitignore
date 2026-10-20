@@ -69,6 +69,7 @@
 !tests/test_auth.py
 !tests/test_metrics.py
 !tests/test_results.py
+!tests/test_routes.py
 !tests/test_spawner.py
 !tests/vm/bin/incus
 !tests/vm/run.sh

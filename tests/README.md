@@ -21,17 +21,25 @@ All three build their own `.venv` on first use.
 - **`test_metrics.py`** — finishes (ranked or not, counted once), the
   `/metrics` text, the per-player endpoint, and a broken database never
   breaking play.
+- **`test_routes.py`** — through real HTTP requests to the app, with Incus
+  faked: the leaderboard's scoring (time added once per level, finishing,
+  resumed or skipped runs unranked and never cleared, fastest first, names
+  escaped) and who gets a box and whose terminal (a GET never starts one, the
+  per-IP limit and bot check run before a box is spent, another account or a
+  missing cookie can't open a terminal or read a save, an image update resumes
+  at the level reached).
 - **`test_results.py`** — the published breakdown.
 
-CI fails below 64% total coverage. `auth.py`, `metrics.py`, `common.py` and
-`gamedata.py` are at 100%; `spawner.py` is about a third, because its box
-lifecycle and proxy need Incus (the VM test covers those). The floor only goes
+CI fails below 74% total coverage. `auth.py`, `metrics.py`, `common.py` and
+`gamedata.py` are at 100%; `spawner.py` is about half. What's left there is
+mostly the box lifecycle and the terminal proxy, which need Incus (the VM test
+covers those), plus the landing page text. The floor only goes
 up: raise it when coverage rises, never lower it to get a change through.
 
 ## Testing the tests (`mutations.sh`)
 
 Coverage says which lines ran; it doesn't say a test would notice if they were
-wrong. `make mutate` checks that: each of its 21 lines plants one realistic bug
+wrong. `make mutate` checks that: each of its 35 lines plants one realistic bug
 (a forged cookie accepted, the bot check skipping the hostname, an off-by-one in
 the throttle, a resumed run ranked, sign-in on without a signing key...), runs
 the unit tests, and restores the code. Every bug must be **caught**; a
