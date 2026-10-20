@@ -23,8 +23,10 @@ cleanup() {
 }
 trap cleanup EXIT
 PATH=$HERE/bin:$PATH SESSION_SECRET=testsecret LISTEN_PORT=8099 TTYD_PORT_BASE=8190 METRICS_PORT=9199 \
-  STATE_FILE=$HANDOVER_VM_STATE/state.json LEADERBOARD_DB=$HANDOVER_VM_STATE/lb.db \
+  STATE_FILE=$HANDOVER_VM_STATE/state.json LEADERBOARD_DB=$HANDOVER_VM_STATE/lb.db LAUNCH_LOCK=$HANDOVER_VM_STATE/launch.lock \
   "$PYTHON" "$HERE/../../spawner/spawner.py" > "$HANDOVER_VM_STATE/spawner.log" 2>&1 &
 SPAWNER=$!
-for _ in $(seq 30); do curl -s http://127.0.0.1:8099/healthz >/dev/null && break; sleep 1; done
+up=""
+for _ in $(seq 30); do curl -s http://127.0.0.1:8099/healthz >/dev/null && { up=1; break; }; sleep 1; done
+[ -n "$up" ] || { echo "the spawner never answered:"; tail -20 "$HANDOVER_VM_STATE/spawner.log"; exit 1; }
 "$HERE/scenarios.sh"

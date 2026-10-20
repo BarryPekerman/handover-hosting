@@ -7,3 +7,6 @@ function loadSave(){var lv={};
   return lv;}
 function storeSave(lv){try{localStorage.setItem(SAVE_KEY,JSON.stringify({v:1,levels:lv}));}catch(e){}}
 function topLevel(lv){var m=0;for(var k in lv)m=Math.max(m,+k);return m;}
+// The server's word wins: drop the levels it rejected, take its passwords.
+function mergeSave(lv,j){(j.drop||[]).forEach(function(n){delete lv[n];});
+  for(var k in j.levels)lv[k]=j.levels[k];return lv;}

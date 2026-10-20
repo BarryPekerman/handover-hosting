@@ -21,7 +21,7 @@ m() {  # file, code as written, the bug, what the bug means
   fi
   mv "$1.orig" "$1"
 }
-trap 'for f in spawner/*.py.orig; do [ -e "$f" ] && mv "$f" "${f%.orig}"; done' EXIT
+trap 'for f in spawner/*.orig spawner/pages/*.orig; do [ -e "$f" ] && mv "$f" "${f%.orig}"; done' EXIT
 m spawner/auth.py 'if not hmac.compare_digest(sig, good):' 'if False:' "cookie signature not checked"
 m spawner/auth.py 'and (not TS_HOSTS or j.get("hostname") in TS_HOSTS))' ')' "Turnstile hostname not checked"
 m spawner/auth.py 'and j.get("action") == TS_ACTION' '' "Turnstile action not checked"
@@ -61,5 +61,12 @@ m spawner/spawner.py 'if not owns(request, sid):       # not your session' 'if F
 m spawner/spawner.py 'if not s or not owns(request, sid):' 'if not s:' "anyone reads any save's passwords"
 m spawner/spawner.py 'headers={"Cache-Control": "no-store"}' 'headers={}' "saved passwords cacheable"
 m spawner/spawner.py 'resume_req[sid] = ({}, lvl,' 'resume_req[sid] = ({}, 0,' "an image update sends players back to level 0"
+m spawner/spawner.py 'run("flock", LAUNCH_LOCK, "timeout", "120", "incus", "launch",' 'run("incus", "launch",' "boxes created at once (Incus uid-range race)"
+# The browser's save (tests/save.test.mjs, through test_save_js.py)
+m spawner/pages/save.js '|1[0-9]|20)$/' '|1[0-9]|2[01])$/' "a save resumes straight at Dave"
+m spawner/pages/save.js "/^[A-Za-z0-9]{1,64}\$/.test(v)" 'true' "anything is kept as a password"
+m spawner/pages/save.js 'm=Math.max(m,+k)' 'm=k>m?k:m' "level 9 counts as higher than 10"
+m spawner/pages/save.js '(j.drop||[]).forEach(function(n){delete lv[n];});' '' "levels the server rejected stay saved"
+m spawner/pages/save.js 'catch(e){}}' 'catch(e){throw e}}' "a private window breaks the page"
 echo; [ "$survived" -eq 0 ] && echo "every planted bug was caught" || echo "$survived bug(s) not caught"
 exit "$survived"

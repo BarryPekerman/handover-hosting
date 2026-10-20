@@ -121,6 +121,40 @@ Host setup changes go in `host/site.yml` (Ansible), never by hand: `deploy.yml`
 applies it on every deploy. Dry run from a laptop:
 `ansible-playbook -i handover, host/site.yml --check --diff`.
 
+## Capacity (measured 2026-10-20)
+
+`scripts/capacity.sh` on the live host (4 cores, 23.4 GiB, no swap), 40 boxes
+in bursts of 10, each with a player logged in through tmux:
+
+| boxes | slowest to be ready | of which booting | free memory | boxes' memory | pool | load (1 min) |
+|---|---|---|---|---|---|---|
+| 10 | 160 s | 8 s | 22.1 GiB | 1.5 GiB | 4.0 GiB | 7.9 |
+| 20 | 121 s | 6 s | 21.3 GiB | 3.0 GiB | 3.7 GiB | 8.9 |
+| 30 | 97 s | 6 s | 20.5 GiB | 4.5 GiB | 4.5 GiB | 9.8 |
+| 40 | 131 s | 7 s | 19.7 GiB | 6.1 GiB | 5.4 GiB | 20.8 |
+
+All 40 boxes searching the filesystem at once took 6 s; the spawner answered
+`/healthz` within 22 ms throughout.
+
+- **Memory isn't the limit.** About 85 MiB per box with a player in it; 40
+  boxes leave 19.7 GiB free. Even all 40 at their 512 MiB limit (20 GiB) fits
+  in 23.4 GiB, just. `MAX_PLAYERS=40` stays.
+- **Starting boxes is.** Starting one box takes 5-15 s, because Incus re-owns
+  every file of the ~0.95 GiB image to the box's own uid range
+  (`security.idmap.isolated`; the files on disk belong to uid 1065536 etc.).
+  That's CPU-heavy (load 20 on 4 cores during a burst) and doesn't get faster
+  in parallel. So when 10 people press Play in the same minute, the 10th waits
+  about 2 minutes on the spinner; 2-3 at once wait 30-45 s. Booting after the
+  start is under 10 s, well inside the spawner's limit, so nobody fails; they
+  wait. Changing it means giving up per-box uid ranges or moving the pool,
+  i.e. infrastructure; not done.
+- The run shows on the Grafana host panels (node-exporter) between 11:55 and
+  12:35 UTC on 2026-10-20; nothing reached the leaderboard or the player
+  metrics.
+
+Rerun after any change to the profile, the image size or the host shape,
+while nobody plays (it refuses otherwise): see `tests/README.md`.
+
 ## Reboots
 
 Kernel updates install unattended; `handover-maybe-reboot.timer` (04:00 Israel
@@ -171,6 +205,15 @@ When the game closes:
    and delete the backup artifacts in GitHub Actions (they expire after 30 days anyway).
 
 ## Known gotchas / non-bugs (seen this session)
+
+- **Boxes are created one at a time (`LAUNCH_LOCK`).** Incus 6.0.0 races when
+  two boxes are created at once with `security.idmap.isolated`: it hands out a
+  uid range below root's subuid range (196608, 262144...; root's starts at
+  1000000), and the box fails to start (`newuidmap ... not allowed`) or runs
+  on a range another box has. Found by the capacity test, 2026-10-20; never
+  seen by a player. The spawner's `incus launch` and the image deploy's
+  warm-up `incus init` take `flock /run/lock/handover-launch`; anything else
+  that creates boxes on the host must too.
 
 - **The btrfs quota counts the shared base image.** Incus sets the limit on a
   box's *referenced* data (~0.95 GiB of image + its own writes), not on what
@@ -236,6 +279,10 @@ which it ignores.)
 - **Seat behaviour under real load** (squatting, cap at 20, 60-min reclaim).
 
 ## Change log
+
+- **2026-10-20:** capacity measured (above); box creation serialised host-wide
+  (`LAUNCH_LOCK`) after the test found Incus's uid-range race; CI runs
+  `make mutate`; the browser save has tests; e2e waits have limits.
 
 - **2026-10-19:** events table (`events` in the leaderboard DB: start, resume,
   reach, finish, end, cmd; no player identity) and command names from the
