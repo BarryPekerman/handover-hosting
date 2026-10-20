@@ -8,6 +8,7 @@ import asyncio
 import os
 import sqlite3
 import sys
+from contextlib import closing
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -20,6 +21,12 @@ import spawner as sp  # noqa: E402
 
 PW = "A" * 32
 WIN = common.WIN_INDEX
+
+
+def query(sql):
+    """Rows from the test database, connection closed."""
+    with closing(sqlite3.connect(common.DB_PATH)) as c:
+        return c.execute(sql).fetchall()
 
 
 @pytest.fixture(autouse=True)
@@ -105,8 +112,7 @@ def poll(sid, reaches, box_reads):
 
 
 def players():
-    return sqlite3.connect(common.DB_PATH).execute(
-        "SELECT key, max_level, accumulated, finished, unranked FROM players ORDER BY key").fetchall()
+    return query("SELECT key, max_level, accumulated, finished, unranked FROM players ORDER BY key")
 
 
 def climb(n, t0=1000, step=60):

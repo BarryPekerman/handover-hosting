@@ -34,6 +34,14 @@ jobs:
       # line whose code moved (STALE), fails CI. About a minute.
       - name: Planted bugs are caught
         run: PY=python3 tests/mutations.sh
+      # The host runs aiohttp 3.9.1 (above); this catches what the next aiohttp
+      # deprecates or breaks before the host's Ubuntu ships it. Deprecation
+      # warnings fail here.
+      - name: Unit tests on the newest aiohttp
+        run: |
+          python3 -m pip install --user --upgrade aiohttp
+          python3 -c "import aiohttp; print('aiohttp', aiohttp.__version__)"
+          python3 -m pytest -q -W error::DeprecationWarning tests/test_*.py
       - name: Install Ansible + ansible-lint (pinned)
         run: python3 -m pip install --user "ansible-core==2.21.5" "ansible-lint==26.9.0"
       - name: Host playbook lints

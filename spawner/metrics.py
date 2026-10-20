@@ -9,6 +9,7 @@ from aiohttp import web
 
 import common
 import gamedata
+from contextlib import closing
 from common import MAX_PLAYERS, PID_RE, WIN_INDEX, db, events, log, sessions, states
 
 # ---------- metrics: Prometheus text format on a localhost-only port ----------
@@ -167,11 +168,8 @@ async def h_metrics(request):
 # which only the oke-prometheus Access token passes. Never on the play port.
 
 def _data(fn):
-    c = db()
-    try:
+    with closing(db()) as c:
         return fn(c)
-    finally:
-        c.close()
 
 
 async def h_data_players(request):
