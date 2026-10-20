@@ -8,7 +8,9 @@ name: deploy
 #
 # Manual on purpose: starting it is the approval for a production deploy.
 #   gh workflow run deploy.yml -R BarryPekerman/handover-hosting
-# Pushes to main only run the checks in ci.yml.
+# Pushes to main only run the checks in ci.yml. Only a commit on main whose ci
+# run passed is deployed, and the deploy fails if the spawner doesn't come
+# back healthy (on the host and through the tunnel) or logs an error starting.
 on:
   workflow_dispatch:
   workflow_call:       # rebuild.yml runs it as one step of a rebuild
@@ -27,11 +29,35 @@ concurrency: deploy        # never overlap two deploys
 
 permissions:
   contents: read
+  actions: read        # look up this commit's ci run
 
 jobs:
   deploy:
     runs-on: ubuntu-24.04
     steps:
+      # Same rule as bandit-wannabe's deploy-image: only what CI passed ships.
+      - name: Check this commit passed ci on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF" != refs/heads/main ]; then
+            echo "::error::deploys run from main only (this is $REF)"; exit 1
+          fi
+          runs=$(gh api "repos/$REPO/actions/runs?head_sha=$SHA&event=push&per_page=20" \
+            -q '[.workflow_runs[] | select(.name == "ci" and .head_branch == "main")]')
+          state=$(jq -r 'if length == 0 then "missing" else (.[0].conclusion // .[0].status) end' <<<"$runs")
+          echo "ci for ${SHA:0:12} on main: $state"
+          case $state in
+            success) ;;
+            missing) echo "::error::no ci run for this commit on main"; exit 1 ;;
+            queued|in_progress|waiting|pending|requested)
+                     echo "::error::ci is still running for this commit; deploy once it passes"; exit 1 ;;
+            *)       echo "::error::ci did not pass for this commit ($state)"; exit 1 ;;
+          esac
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -74,6 +100,34 @@ jobs:
             cat > /home/ubuntu/handover-spawner.env
             chmod 600 /home/ubuntu/handover-spawner.env
             sudo systemctl restart handover-spawner
-            sleep 2
-            echo "health: $(curl -s 127.0.0.1:8080/healthz)"
           '
+
+      # The restart must come back: healthz answers on the host within 30 s,
+      # the unit stays up, and nothing was logged at error level since the
+      # restart (an import error or a crash at startup turns the deploy red).
+      - name: Spawner is healthy
+        run: |
+          ssh handover '
+            since=$(systemctl show handover-spawner -p ActiveEnterTimestamp --value)
+            for _ in $(seq 30); do
+              h=$(curl -fsS --max-time 2 127.0.0.1:8080/healthz 2>/dev/null) && break
+              sleep 1
+            done
+            echo "healthz: ${h:-no answer}"
+            [ -n "$h" ] || { journalctl -u handover-spawner -n 30 --no-pager; exit 1; }
+            sleep 3
+            systemctl is-active --quiet handover-spawner || { echo "spawner stopped after starting"; exit 1; }
+            # Python logs to stderr, which journald files at info level, so
+            # match the log text, not the journal priority.
+            errs=$(journalctl -u handover-spawner --since "$since" -o cat --no-pager \
+                   | grep -E " (ERROR|CRITICAL) |Traceback" || true)
+            [ -z "$errs" ] || { echo "errors since the restart:"; echo "$errs"; exit 1; }
+          ' </dev/null
+
+      - name: The game answers through the tunnel
+        run: |
+          for _ in $(seq 10); do
+            curl -fsS --max-time 5 https://play.barrypekerman.com/healthz && exit 0
+            sleep 3
+          done
+          echo "::error::https://play.barrypekerman.com/healthz did not answer"; exit 1

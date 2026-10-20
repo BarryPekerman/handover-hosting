@@ -105,7 +105,8 @@ Manual on purpose (starting it is the approval):
 `gh workflow run deploy.yml -R BarryPekerman/handover-hosting` applies the host
 playbook (including the tunnel connector, with its run token), copies the
 spawner, writes the secrets and restarts
-the service.
+the service. It only deploys a commit on `main` whose CI passed, and fails
+unless the spawner comes back healthy.
 Pushes only run `ci.yml`. Infra: `infra/README.md`.
 
 ## Isolation

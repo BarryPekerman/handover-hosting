@@ -108,7 +108,11 @@ Deploying spawner changes: `gh workflow run deploy.yml` (manual = the approval;
 pushes to `main` only run `ci.yml`). `.github/workflows/deploy.yml`
 applies `host/site.yml` (with the tunnel's run token from `CF_TUNNEL_TOKEN`),
 copies `spawner/`, writes the secrets env file from GitHub Secrets and restarts
-the spawner. Don't scp by
+the spawner. It refuses a commit that isn't on `main` with a passing `ci` run
+(wait for CI after merging), and fails if the spawner doesn't answer `/healthz`
+on the host within 30 s, stops, logs an `ERROR`/`Traceback` since the restart,
+or doesn't answer through the tunnel. A red deploy has still restarted the
+spawner: look at the step's output, fix, deploy again. Don't scp by
 hand. The game image ships the same way from bandit-wannabe: a `ci` run on
 `main` builds and tests it, then
 `gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<id>`

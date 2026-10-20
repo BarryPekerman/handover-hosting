@@ -73,6 +73,9 @@ jobs:
 
   host:
     needs: reach
+    permissions:
+      contents: read
+      actions: read     # deploy.yml checks the commit passed ci
     uses: ./.github/workflows/deploy.yml
     secrets:
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
