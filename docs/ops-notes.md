@@ -139,15 +139,17 @@ All 40 boxes searching the filesystem at once took 6 s; the spawner answered
 - **Memory isn't the limit.** About 85 MiB per box with a player in it; 40
   boxes leave 19.7 GiB free. Even all 40 at their 512 MiB limit (20 GiB) fits
   in 23.4 GiB, just. `MAX_PLAYERS=40` stays.
-- **Starting boxes is.** Starting one box takes 5-15 s, because Incus re-owns
-  every file of the ~0.95 GiB image to the box's own uid range
-  (`security.idmap.isolated`; the files on disk belong to uid 1065536 etc.).
-  That's CPU-heavy (load 20 on 4 cores during a burst) and doesn't get faster
-  in parallel. So when 10 people press Play in the same minute, the 10th waits
-  about 2 minutes on the spinner; 2-3 at once wait 30-45 s. Booting after the
-  start is under 10 s, well inside the spawner's limit, so nobody fails; they
-  wait. Changing it means giving up per-box uid ranges or moving the pool,
-  i.e. infrastructure; not done.
+- **Starting boxes is.** Boxes are created one at a time (`LAUNCH_LOCK`,
+  below), about 4.5 s each on a quiet host, then boot in parallel (~2 s). So
+  the Nth player of a burst waits about 4.5 x N s: 8 at once were all ready in
+  37 s (measured with the spawner's polling). It's slower when the host is
+  busy: right after many boxes were deleted (btrfs cleans them up in the
+  background) one create took 7-15 s, and with 30-40 boxes running the 10th of
+  a burst waited up to ~2 min in the test above. Nobody fails; the spinner
+  waits. Per-box uid ranges aren't the cost: a box without one
+  (`security.idmap.isolated=false`) was no faster (4.8 s vs 4.5 s), as Incus
+  re-owns the image's files either way. What would help is keeping a few
+  boxes started ahead of time (not built).
 - The run shows on the Grafana host panels (node-exporter) between 11:55 and
   12:35 UTC on 2026-10-20; nothing reached the leaderboard or the player
   metrics.
