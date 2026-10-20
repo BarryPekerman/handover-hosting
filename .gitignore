@@ -27,6 +27,7 @@
 !.github/workflows/rebuild.yml
 !.github/workflows/terraform.yml
 !.gitignore
+!Makefile
 !README.md
 !docs/hardening-plan.md
 !docs/ops-notes.md
