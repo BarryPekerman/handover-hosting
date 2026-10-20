@@ -44,6 +44,7 @@
 !infra/hostkey.tf
 !infra/main.tf
 !infra/metrics.tf
+!infra/portfolio.tf
 !infra/network.tf
 !infra/terraform.tfvars.example
 !infra/tunnel.tf
