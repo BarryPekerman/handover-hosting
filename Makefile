@@ -1,4 +1,4 @@
-.PHONY: help test e2e
+.PHONY: help test mutate e2e
 
 # bandit-wannabe's checkout: its Vagrant VM is the game box the end-to-end test plays.
 BANDIT ?= ../bandit-wannabe
@@ -16,7 +16,10 @@ $(PY):
 
 test: $(PY) ## Lint + unit tests with coverage (what CI runs; seconds)
 	$(PY) -m ruff check --select F,E9 spawner scripts tests
-	$(PY) -m pytest -q tests/test_*.py --cov=spawner --cov=scripts --cov-report=term-missing --cov-fail-under=64
+	$(PY) -m pytest -q tests/test_*.py --cov=spawner --cov=scripts --cov-report=term-missing --cov-fail-under=74
+
+mutate: $(PY) ## Plant known bugs one at a time; the unit tests must catch each (~1 min)
+	PY=$(PY) tests/mutations.sh
 
 e2e: $(PY) ## End to end against the Vagrant game VM: real spawner, ttyd, tmux (~3 min)
 	@cd $(BANDIT) && vagrant status handover 2>/dev/null | grep -q 'running' \

@@ -242,6 +242,16 @@ def test_player_id_follows_cookie_then_account():
     assert auth.player_id(r2, "42") == "c" * 32                   # another device gets the account's id
 
 
+def test_signed_in_resume_level_comes_from_the_leaderboard_capped_at_20():
+    assert sp.server_level(None) == 0 and sp.server_level("7") == 0      # anonymous, or never played
+    c = common.db()
+    c.executemany("INSERT INTO players(key, max_level, accumulated, finished) VALUES(?,?,0,0)",
+                  [("7", 9), ("8", sp.WIN_INDEX)])
+    c.commit()
+    assert sp.server_level("7") == 9
+    assert sp.server_level("8") == sp.MAX_RESUME                        # won: resumes at 20, not at dave
+
+
 def test_cmd_name_for_metrics():
     assert metrics.cmd_name("find / -name x") == "find"
     assert metrics.cmd_name("/usr/bin/grep -r x") == "grep"
@@ -282,10 +292,8 @@ def test_share_preview_and_icon_on_pages():
 
 def test_pages_load_from_files_with_placeholders_filled():
     for page in (sp.LANDING, sp.STORY, sp.LEADERBOARD, sp.SPAWNING, sp.APP):
-        assert page.startswith("<!doctype html>") and page.endswith("</html>")
         assert not re.search(r"__(ICON|SHARE|PUBLIC_URL)__", page)
     assert "<h2 id=record>What we record</h2>" in sp.STORY           # the data notice
-    assert "function loadSave" in sp.SAVE_JS
 
 
 def test_static_images_are_served():

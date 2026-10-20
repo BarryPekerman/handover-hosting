@@ -86,14 +86,6 @@ def test_events_carry_the_boxs_player_id_and_status():
     assert rows == [("p-1", "cmd", 0, "f" * 32), ("p-9", "reach", None, None)]
 
 
-def test_player_row():
-    assert common.player_row("anon:x") is None
-    c = common.db()
-    c.execute("INSERT INTO players(key, max_level, accumulated, finished) VALUES('7', 9, 600, 0)")
-    c.commit()
-    assert common.player_row("7") == (9, 600, 0)
-
-
 def test_player_endpoint_serves_only_well_formed_ids():
     c = common.db()
     c.execute("INSERT INTO events(ts, box, kind, level, detail, pid) VALUES(1, 'p-1', 'reach', 0, '', 'x')")
