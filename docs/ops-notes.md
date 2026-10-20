@@ -27,7 +27,8 @@ top. Not player-facing.
   Terraform (`infra/tunnel.tf`); the host holds only the run token
   (`/etc/cloudflared/handover-tf.env`). Nothing is open inbound on the origin,
   SSH included.
-- **Spawner:** `spawner.py` (aiohttp), systemd unit `handover-spawner`
+- **Spawner:** `spawner.py` (aiohttp; its pages are `~/pages/*.html`, read at
+  startup, so a text edit needs a deploy/restart), systemd unit `handover-spawner`
   (`/etc/systemd/system/handover-spawner.service`, runs as `ubuntu`,
   `ExecStart=/home/ubuntu/spawner.py`). One per-player **Incus** container
   (`p-<sid12>`) + its own loopback **ttyd**, reverse-proxied at `/t/<sid>/`.

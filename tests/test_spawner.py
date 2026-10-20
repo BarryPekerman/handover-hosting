@@ -8,6 +8,7 @@ tests/README.md.
 import asyncio
 import json
 import os
+import re
 import sqlite3
 import sys
 
@@ -274,6 +275,14 @@ def test_share_preview_and_icon_on_pages():
         assert "twitter:card" in page
     for page in (sp.SPAWNING, sp.APP):
         assert "rel=icon" in page and "og:image" not in page
+
+
+def test_pages_load_from_files_with_placeholders_filled():
+    for page in (sp.LANDING, sp.STORY, sp.LEADERBOARD, sp.SPAWNING, sp.APP):
+        assert page.startswith("<!doctype html>") and page.endswith("</html>")
+        assert not re.search(r"__(ICON|SHARE|PUBLIC_URL)__", page)
+    assert "<h2 id=record>What we record</h2>" in sp.STORY           # the data notice
+    assert "function loadSave" in sp.SAVE_JS
 
 
 def test_static_images_are_served():

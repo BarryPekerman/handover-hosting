@@ -67,7 +67,8 @@ run: `ansible-playbook -i <host>, -u ubuntu --private-key <key> host/site.yml --
 
 ## Spawner
 
-`spawner/spawner.py`, one aiohttp file. A visitor's box is a container
+`spawner/spawner.py` (aiohttp), with its web pages as plain files in
+`spawner/pages/` (edit the text there). A visitor's box is a container
 `p-<sid>` launched from `handover` on the `isolated` profile, plus a ttyd on a
 loopback port; the spawner reverse-proxies HTTP **and the terminal WebSocket**
 under `/t/<sid>/`.

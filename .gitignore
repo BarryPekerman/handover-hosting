@@ -13,6 +13,7 @@
 !infra/
 !scripts/
 !spawner/
+!spawner/pages/
 !spawner/static/
 !tests/
 !tests/vm/
@@ -50,6 +51,13 @@
 !scripts/results.py
 !spawner/gamedata.py
 !spawner/spawner.py
+!spawner/pages/app.html
+!spawner/pages/landing.html
+!spawner/pages/leaderboard.html
+!spawner/pages/save.js
+!spawner/pages/share.html
+!spawner/pages/spawning.html
+!spawner/pages/story.html
 !spawner/static/favicon.png
 !spawner/static/og.png
 !tests/README.md
