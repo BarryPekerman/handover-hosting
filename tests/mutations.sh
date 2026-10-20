@@ -62,6 +62,14 @@ m spawner/spawner.py 'if not s or not owns(request, sid):' 'if not s:' "anyone r
 m spawner/spawner.py 'headers={"Cache-Control": "no-store"}' 'headers={}' "saved passwords cacheable"
 m spawner/spawner.py 'resume_req[sid] = ({}, lvl,' 'resume_req[sid] = ({}, 0,' "an image update sends players back to level 0"
 m spawner/spawner.py 'run("flock", LAUNCH_LOCK, "timeout", "120", "incus", "launch",' 'run("incus", "launch",' "boxes created at once (Incus uid-range race)"
+# Standby boxes (tests/test_standby.py)
+m spawner/spawner.py 'if rc == 0 and not (common.live_image and image != common.live_image):' 'if rc == 0:' "a standby box on the old image is handed out"
+m spawner/spawner.py 'if rc == 0 and not (common.live_image and image != common.live_image):' 'if not (common.live_image and image != common.live_image):' "a dead standby box is handed out"
+m spawner/spawner.py 'min(WARM_SPARES - len(spares) - building, MAX_PLAYERS - boxes)' 'WARM_SPARES - len(spares) - building' "standby boxes past MAX_PLAYERS boxes"
+m spawner/spawner.py '| set(spares) | in_flight)' ')' "the sweep deletes standby boxes"
+m spawner/spawner.py '        if common.live_image and image != common.live_image:' '        if False:' "old standby boxes kept after an image deploy"
+m spawner/spawner.py 'fill_spares()                     # replace' 'pass  #' "no replacement after a handout"
+m spawner/spawner.py 'choose_start(ct, resume_req' 'choose_start("p-" + sid[:12], resume_req' "a resume checked against the wrong box"
 # The browser's save (tests/save.test.mjs, through test_save_js.py)
 m spawner/pages/save.js '|1[0-9]|20)$/' '|1[0-9]|2[01])$/' "a save resumes straight at Dave"
 m spawner/pages/save.js "/^[A-Za-z0-9]{1,64}\$/.test(v)" 'true' "anything is kept as a password"
