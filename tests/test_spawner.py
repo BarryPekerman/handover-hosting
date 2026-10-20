@@ -11,6 +11,7 @@ import os
 import re
 import sqlite3
 import sys
+from contextlib import closing
 
 import pytest
 
@@ -32,6 +33,12 @@ class Req:
             self.cookies[common.COOKIE] = hid
         if uid:
             self.cookies["ghid"] = auth._sign({"uid": uid, "login": "u" + str(uid)})
+
+
+def query(sql):
+    """Rows from the test database, connection closed."""
+    with closing(sqlite3.connect(common.DB_PATH)) as c:
+        return c.execute(sql).fetchall()
 
 
 @pytest.fixture(autouse=True)
@@ -190,7 +197,7 @@ def test_long_breaks_stay_out_of_the_histogram_but_in_events():
     metrics.count_progress(common.sessions["s1"], {0: 0, 1: metrics.SOLVE_CAP + 1, 2: metrics.SOLVE_CAP + 61})
     assert list(metrics.solve_hist) == [1]                                   # level 0 was capped
     assert metrics.counters[("handover_level_solve_capped_total", (("level", "0"),))] == 1
-    rows = sqlite3.connect(common.DB_PATH).execute("SELECT ts, box, kind, level FROM events").fetchall()
+    rows = query("SELECT ts, box, kind, level FROM events")
     assert rows == [(0, "p-1", "reach", 0), (metrics.SOLVE_CAP + 1, "p-1", "reach", 1),
                     (metrics.SOLVE_CAP + 61, "p-1", "reach", 2)]
 
@@ -224,7 +231,7 @@ def test_commands_from_the_journal():
     assert 'handover_commands_total{cmd="find",level="3"} 2' in text
     assert 'handover_commands_total{cmd="other",level="21"} 1' in text
     assert 'handover_wrong_passwords_total{level="3"} 1' in text
-    rows = sqlite3.connect(common.DB_PATH).execute("SELECT kind, detail, status, pid FROM events").fetchall()
+    rows = query("SELECT kind, detail, status, pid FROM events")
     assert rows[0] == ("cmd", "find / -perm -4000 2>/dev/null", 0, "a" * 32)
     assert rows[-1] == ("badpass", "level4", None, "a" * 32)
 
@@ -248,6 +255,7 @@ def test_signed_in_resume_level_comes_from_the_leaderboard_capped_at_20():
     c.executemany("INSERT INTO players(key, max_level, accumulated, finished) VALUES(?,?,0,0)",
                   [("7", 9), ("8", sp.WIN_INDEX)])
     c.commit()
+    c.close()
     assert sp.server_level("7") == 9
     assert sp.server_level("8") == sp.MAX_RESUME                        # won: resumes at 20, not at dave
 
@@ -357,6 +365,7 @@ def test_player_data_endpoints():
         (140, "p-1", "badpass", 0, "level1", None, A), (160, "p-1", "reach", 1, "", None, A),
         (170, "p-2", "cmd", 0, "ls", 0, None)])                       # no player id: left out
     c.commit()
+    c.close()
 
     async def go():
         async with TestClient(TestServer(metrics.make_metrics_app())) as cl:

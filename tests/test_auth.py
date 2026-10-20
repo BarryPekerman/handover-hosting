@@ -8,6 +8,7 @@ import os
 import sys
 
 import pytest
+from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "spawner"))
@@ -85,7 +86,7 @@ def test_identity_is_anonymous_without_a_signing_key(monkeypatch):
     (common.COOKIE, lambda r: auth.with_cookie(r, "s" * 32)),
 ])
 def test_id_cookies_are_hidden_from_page_scripts_and_other_sites(name, set_cookie):
-    c = set_cookie(auth.web.Response()).cookies[name]
+    c = set_cookie(web.Response()).cookies[name]
     assert c["httponly"] and c["samesite"] == "Lax"
 
 
@@ -202,20 +203,20 @@ def test_sign_in_is_off_if_any_setting_is_missing(oauth, monkeypatch, missing):
     assert auth.oauth_ready()
     monkeypatch.setattr(auth, missing, "")
     assert not auth.oauth_ready()
-    assert asyncio.run(auth.h_login(req("/login"))).location == "/"
+    assert asyncio.run(auth.h_login(req("/login"))).headers["Location"] == "/"
 
 
 def test_login_redirects_to_github_with_a_state_cookie(oauth):
     r = asyncio.run(auth.h_login(req("/login")))
     state = r.cookies["oauth_state"].value
-    assert r.location.startswith("https://github.com/login/oauth/authorize?client_id=cid")
-    assert f"state={state}" in r.location and f"redirect_uri={common.PUBLIC_URL}/auth/callback" in r.location
+    assert r.headers["Location"].startswith("https://github.com/login/oauth/authorize?client_id=cid")
+    assert f"state={state}" in r.headers["Location"] and f"redirect_uri={common.PUBLIC_URL}/auth/callback" in r.headers["Location"]
 
 
 def test_callback_signs_the_player_in(oauth):
     oauth({"access_token": "gho_x"}, {"id": 42, "login": "octo"})
     r = callback()
-    assert r.location == "/"
+    assert r.headers["Location"] == "/"
     assert auth._unsign(r.cookies["ghid"].value) == {"uid": 42, "login": "octo"}
     assert r.cookies["ghid"]["secure"] and r.cookies["ghid"]["httponly"]
 
@@ -234,7 +235,7 @@ def test_callback_rejects_a_bad_state_or_code(oauth, kw):
 def test_callback_failures_go_home_signed_out(oauth, token_reply, user_reply):
     oauth(token_reply, user_reply)
     r = callback()
-    assert r.location == "/" and "ghid" not in r.cookies
+    assert r.headers["Location"] == "/" and "ghid" not in r.cookies
 
 
 def test_logout_forgets_the_account_and_this_devices_box():
