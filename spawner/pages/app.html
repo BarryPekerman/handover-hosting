@@ -1,0 +1,63 @@
+<!doctype html><html><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">__ICON__
+<title>The Handover</title><style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;height:100vh;display:flex;background:#000;color:#33ff66;
+font-family:monospace;overflow:hidden}
+#term{flex:1;border:0;height:100vh;width:100%}
+#notes{width:300px;max-width:42vw;display:flex;flex-direction:column;
+border-left:1px solid #0a3;background:#021}
+#notes h3{margin:0;padding:.5rem .7rem;font-size:.8rem;border-bottom:1px solid #0a3;
+display:flex;justify-content:space-between;align-items:center;font-weight:normal}
+#notes h3 b{color:#33ff66}#notes h3 span{opacity:.55}
+#pad{flex:1;background:#000;color:#33ff66;border:0;padding:.6rem;
+font-family:monospace;font-size:.85rem;line-height:1.5;resize:none;outline:none}
+#toggle{position:fixed;top:.4rem;right:.4rem;z-index:10;background:#021;color:#33ff66;
+border:1px solid #0a3;padding:.35rem .7rem;cursor:pointer;font-family:monospace;display:none}
+.hidden{display:none!important}
+#toast{position:fixed;top:.6rem;left:50%;transform:translateX(-50%);z-index:20;
+background:#021;border:1px solid #33ff66;padding:.5rem .9rem;max-width:90vw;transition:opacity .6s}
+@media(max-width:700px){
+  #notes{position:fixed;top:0;right:0;height:100vh;width:82vw;max-width:none;z-index:9;
+    box-shadow:-8px 0 24px #000}
+  #toggle{display:block}
+}
+</style></head><body>
+<iframe id=term src="/t/__SID__/" title="terminal"></iframe>
+<aside id=notes>
+  <h3><b>your notes</b> <span id=st>saved in this browser</span></h3>
+  <textarea id=pad spellcheck=false placeholder="Your progress saves automatically. Jot down anything else worth remembering.
+
+Stays in your browser &mdash; never sent to the server."></textarea>
+</aside>
+<button id=toggle>notes</button>
+<script>
+var pad=document.getElementById('pad'),notes=document.getElementById('notes'),
+    tg=document.getElementById('toggle'),KEY='handover-notes';
+try{pad.value=localStorage.getItem(KEY)||'';}catch(e){}
+pad.addEventListener('input',function(){try{localStorage.setItem(KEY,pad.value);}catch(e){}});
+tg.addEventListener('click',function(){notes.classList.toggle('hidden');});
+if(matchMedia('(max-width:700px)').matches)notes.classList.add('hidden');
+__SAVE_JS__
+var st=document.getElementById('st'),noted=false;
+function toast(t){var d=document.createElement('div');d.id='toast';d.textContent=t;
+  document.body.appendChild(d);setTimeout(function(){d.style.opacity=0;},5000);
+  setTimeout(function(){d.remove();},6000);}
+function sync(){
+  fetch('/save/__SID__',{cache:'no-store'}).then(function(r){
+    if(r.status===404){location.replace('/');return null;}   // session recycled
+    return r.ok?r.json():null;})
+  .then(function(j){
+    if(!j)return;
+    var lv=loadSave();
+    (j.drop||[]).forEach(function(n){delete lv[n];});
+    for(var k in j.levels)lv[k]=j.levels[k];
+    storeSave(lv);
+    var n=topLevel(lv);
+    st.textContent=n?'progress saved: level '+n:'saved in this browser';
+    if(j.note&&!noted){noted=true;toast(j.note);}
+  }).catch(function(){});
+}
+sync();setInterval(sync,20000);
+</script>
+</body></html>
