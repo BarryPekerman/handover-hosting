@@ -65,6 +65,7 @@
 !spawner/static/favicon.png
 !spawner/static/og.png
 !tests/README.md
+!tests/mutations.sh
 !tests/test_auth.py
 !tests/test_metrics.py
 !tests/test_results.py
