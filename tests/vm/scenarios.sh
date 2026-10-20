@@ -1,5 +1,5 @@
 #!/bin/bash
-# The eight end-to-end scenarios; run through run.sh (which starts the spawner).
+# The nine end-to-end scenarios; run through run.sh (which starts the spawner).
 # Each check prints ok or FAIL with what happened and what should; the script
 # exits non-zero if any check failed.
 # shellcheck disable=SC2329  # the is_*/saved7/... checks are called through wait_for
@@ -58,8 +58,10 @@ provisions() { grep -c "provisioned sid=${B:0:12}" spawner.log; }
 before=$(provisions)
 reprovisioned() { [ "$(provisions)" -gt "$before" ]; }
 curl -s -c B.jar -b B.jar -d mode=fresh "$U/play" >/dev/null; ready "$B"; wait_for 15 reprovisioned
-got=$(grep -o "provisioned sid=${B:0:12}.*start=level[0-9]*" spawner.log | tail -1 | grep -o 'start=.*')
-check "  upgraded" "$got on image $(cat "base-p-${B:0:12}")" "start=level7 on image 22222222"
+# The new box may be a standby one (w-*), so take its name from the log.
+line=$(grep "provisioned sid=${B:0:12}" spawner.log | tail -1)
+ct=$(grep -o 'ct=[^ ]*' <<<"$line" | cut -d= -f2)
+check "  upgraded" "$(grep -o 'start=level[0-9]*' <<<"$line") on image $(cat "base-$ct")" "start=level7 on image 22222222"
 
 # 6. Ranking: every run here is unranked, because the VM's history skips
 #    levels (a real box always records level0 first) and B also resumed.
@@ -82,6 +84,14 @@ ncmd=$("$PY" -c "import sqlite3; print(sqlite3.connect('lb.db').execute(\"select
 if [ "$ncmd" -gt 0 ]; then
   check_min "  commands" "$(grep -c '^handover_commands_total' <<<"$m")" 1
 fi
+# 9. Standby boxes (WARM_SPARES=1): one is started at once, players get it
+#    without a create, each handout starts a replacement, and the image
+#    update above replaced the one on the old image.
+check_min "9 standby handed out" "$(grep -c 'gets standby box' spawner.log)" 1
+check_min "  standby started" "$(grep -c 'standby box w-[0-9a-f]* ready' spawner.log)" 2
+check "  old image dropped" "$(grep -c 'is on the old image' spawner.log)" 1
+has_spare() { [ "$(curl -s http://127.0.0.1:9199/metrics | grep '^handover_spares ' | cut -d' ' -f2)" = 1 ]; }
+check "  one waiting" "$(wait_for 30 has_spare && echo 1 || echo 0) standby box" "1 standby box"
 check "tracebacks" "$(grep -c Traceback spawner.log)" 0
 
 echo; [ "$FAILS" -eq 0 ] && echo "all checks passed" || echo "$FAILS check(s) failed"

@@ -15,6 +15,9 @@ TimeoutStopSec=15
 Environment=LISTEN_HOST=127.0.0.1
 Environment=LISTEN_PORT=8080
 Environment=MAX_PLAYERS=60
+# Standby boxes kept started so players don't wait for a create (0 = off).
+# They count toward the 60 boxes, so the memory limits still add up.
+Environment=WARM_SPARES=3
 Environment=IDLE_MIN=15
 Environment=MAX_LIFETIME_MIN=1440
 # Turnstile sitekey + secret come from Terraform via deploy.yml, in the env

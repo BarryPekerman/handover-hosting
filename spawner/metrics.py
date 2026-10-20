@@ -135,6 +135,7 @@ def render_metrics() -> str:
     out = [
         "# TYPE handover_players gauge", f"handover_players {len(sessions)}",
         "# TYPE handover_seats gauge", f"handover_seats {MAX_PLAYERS}",
+        "# TYPE handover_spares gauge", f"handover_spares {len(common.spares)}",
         "# TYPE handover_starting gauge",
         f"handover_starting {sum(1 for v in states.values() if v == 'pending')}",
         "# TYPE handover_info gauge", f'handover_info{{image="{common.live_image[:12]}"}} 1',

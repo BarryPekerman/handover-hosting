@@ -29,6 +29,7 @@ Config via env (all optional; secrets come from the EnvironmentFile):
   LISTEN_HOST=127.0.0.1  LISTEN_PORT=8080   PUBLIC_URL=https://play.barrypekerman.com
   BASE_IMAGE=handover    PROFILE=isolated   LOGIN_USER=level0
   MAX_PLAYERS=60         IDLE_MIN=60        MAX_LIFETIME_MIN=1440
+  WARM_SPARES=0          (standby boxes kept started; the unit sets 3)
   OUTDATED_IDLE_MIN=5    (idle boxes on a replaced image are recycled)
   RATE_MAX=5 RATE_WINDOW=600   (new boxes per client IP per window, seconds)
   TTYD_PORT_BASE=8100   METRICS_PORT=9101 (localhost-only /metrics)
@@ -53,6 +54,7 @@ from aiohttp import web, ClientSession, WSMsgType, WSCloseCode
 import common
 from common import (
     BASE_IMAGE, IDLE_SEC, LAUNCH_LOCK, LISTEN_HOST, LISTEN_PORT, LOGIN_USER, MAX_LIFE, MAX_PLAYERS,
+    WARM_SPARES, in_flight, spares,
     MAX_RESUME, OUTDATED_IDLE, PASS_RE, PORT_BASE, PROFILE, PUBLIC_URL, STATE_FILE,
     WIN_INDEX, background, box_pid, db, events, live_ws, locks, log, pids, player_row,
     redirect, resume_req, sessions, states, who,
@@ -279,15 +281,17 @@ async def record_finishers():
 
 
 async def sweep_orphans():
-    """Delete any p-* container the spawner isn't tracking. Every legitimate
-    container is either a live session or mid-provision (its sid is in `states`
-    'pending'), so anything else is abandoned — a crash mid-provision, a stale
-    launch, a desync — and would otherwise leak RAM + inotify forever."""
-    live = {"p-" + s[:12] for s in sessions} | {"p-" + s[:12] for s in states}
+    """Delete any p-* (player) or w-* (standby) container the spawner isn't
+    tracking. Every legitimate one is a live session, a standby box, or being
+    created or handed out (`in_flight`), so anything else is abandoned — a
+    crash mid-provision, standby boxes from before a restart, a desync — and
+    would otherwise leak RAM + inotify forever."""
+    live = ({s["ct"] for s in sessions.values()} | {"p-" + s[:12] for s in states}
+            | set(spares) | in_flight)
     _, out = await run("incus", "list", "-c", "n", "-f", "csv")
     for line in out.splitlines():
         name = line.strip()
-        if name.startswith("p-") and name not in live:
+        if name.startswith(("p-", "w-")) and name not in live:
             log.warning("sweeping orphan container %s", name)
             await run("incus", "delete", "-f", name)
 
@@ -379,47 +383,115 @@ async def start_ttyd(sid: str, ct: str, port: int, user: str):
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
 
 
+async def start_box(ct: str) -> bool:
+    """Create a box and wait until it has booted. False (box deleted) if it never does."""
+    # NIC-less launch prints a warning and returns non-zero; that's expected.
+    # One creation at a time host-wide (see LAUNCH_LOCK); booting is parallel.
+    # A launch takes ~5 s; the timeout keeps a hung one from holding the
+    # lock (and every player after it) forever.
+    await run("flock", LAUNCH_LOCK, "timeout", "120", "incus", "launch", BASE_IMAGE, ct, "--profile", PROFILE)
+    for _ in range(40):
+        _, out = await run("incus", "exec", ct, "--", "systemctl", "is-system-running")
+        if out.strip() in ("running", "degraded"):
+            # Clean prompt: give every container the same friendly hostname so the
+            # shell shows "levelN@handover" instead of "levelN@p-9f3c…". The random
+            # instance-name hostname reads as noise on a cramped phone screen
+            # (e.g. "level0@p-…" gets misread as "level10").
+            await run("incus", "exec", ct, "--", "hostnamectl", "set-hostname", "handover")
+            return True
+        await asyncio.sleep(1)
+    log.error("container %s never became ready; tearing down", ct)
+    await run("incus", "delete", "-f", ct)
+    return False
+
+
+# ---- standby boxes (WARM_SPARES) ----
+# A few boxes are kept started (w-<random>), so a player gets one at once
+# instead of waiting for theirs to be created behind everyone else's. They're
+# ordinary boxes from the live image: nobody has logged in, so they hold no
+# progress, and a resume checks its saved passwords against whichever box the
+# player gets. They aren't players: no events, no seat, until handed out.
+
+async def take_spare() -> str:
+    """A standby box on the live image, claimed for the caller, or "" if none."""
+    while spares:
+        ct, image = spares.popitem()
+        in_flight.add(ct)
+        rc, _ = await run("incus", "exec", ct, "--", "true")
+        if rc == 0 and not (common.live_image and image != common.live_image):
+            return ct
+        in_flight.discard(ct)
+        await run("incus", "delete", "-f", ct)
+    return ""
+
+
+async def build_spare(ct: str):
+    try:
+        if await start_box(ct):
+            spares[ct] = await container_image(ct)
+            log.info("standby box %s ready (%d ready)", ct, len(spares))
+    except Exception:
+        log.exception("standby box %s failed", ct)
+        await run("incus", "delete", "-f", ct)
+    finally:
+        in_flight.discard(ct)
+
+
+def fill_spares():
+    """Start standby boxes in the background up to WARM_SPARES, never past
+    MAX_PLAYERS boxes in all (so the per-box memory limits still add up)."""
+    building = sum(1 for n in in_flight if n.startswith("w-"))
+    boxes = len(sessions) + len(spares) + len(in_flight)
+    for _ in range(max(0, min(WARM_SPARES - len(spares) - building, MAX_PLAYERS - boxes))):
+        ct = "w-" + secrets.token_hex(6)
+        in_flight.add(ct)
+        task = asyncio.create_task(build_spare(ct))
+        background.add(task)
+        task.add_done_callback(background.discard)
+
+
+async def drop_outdated_spares():
+    """After an image deploy, standby boxes on the old image are deleted (the
+    reaper's next fill_spares starts new ones)."""
+    for ct, image in list(spares.items()):
+        if common.live_image and image != common.live_image:
+            spares.pop(ct, None)
+            log.info("standby box %s is on the old image; deleting", ct)
+            await run("incus", "delete", "-f", ct)
+
+
 async def provision(sid: str) -> dict | None:
-    """Create the container + ttyd for sid. Returns the session or None on cap/failure."""
+    """Give sid a box (a standby one if ready, else a new one) and a ttyd.
+    Returns the session or None on cap/failure."""
     lock = locks.setdefault(sid, asyncio.Lock())
     async with lock:
         if sid in sessions:
             return sessions[sid]
         if len(sessions) >= MAX_PLAYERS:
             return None
-        ct = "p-" + sid[:12]
-        # NIC-less launch prints a warning and returns non-zero; that's expected.
-        # One creation at a time host-wide (see LAUNCH_LOCK); booting is parallel.
-        # A launch takes ~15 s; the timeout keeps a hung one from holding the
-        # lock (and every player after it) forever.
-        await run("flock", LAUNCH_LOCK, "timeout", "120", "incus", "launch", BASE_IMAGE, ct, "--profile", PROFILE)
-        ok = False
-        for _ in range(40):
-            _, out = await run("incus", "exec", ct, "--", "systemctl", "is-system-running")
-            if out.strip() in ("running", "degraded"):
-                ok = True
-                break
-            await asyncio.sleep(1)
-        if not ok:
-            log.error("container %s never became ready; tearing down", ct)
-            await run("incus", "delete", "-f", ct)
-            return None
-        # Clean prompt: give every container the same friendly hostname so the
-        # shell shows "levelN@handover" instead of "levelN@p-9f3c…". The random
-        # instance-name hostname reads as noise on a cramped phone screen
-        # (e.g. "level0@p-…" gets misread as "level10").
-        await run("incus", "exec", ct, "--", "hostnamectl", "set-hostname", "handover")
-        start, drop, note = await choose_start(ct, resume_req.pop(sid, None))
-        port = alloc_port()
-        proc = await start_ttyd(sid, ct, port, login_user(start))
-        now = time.time()
-        box_pid[ct] = pids.get(sid, "")
-        sessions[sid] = {"ct": ct, "port": port, "proc": proc, "created": now, "last": now,
-                         "start": start, "passes": {}, "drop": drop, "note": note,
-                         "image": await container_image(ct)}
+        ct = await take_spare()
+        try:
+            if ct:
+                log.info("sid=%s gets standby box %s", sid[:12], ct)
+            else:
+                ct = "p-" + sid[:12]
+                in_flight.add(ct)
+                if not await start_box(ct):
+                    return None
+            start, drop, note = await choose_start(ct, resume_req.pop(sid, None))
+            port = alloc_port()
+            proc = await start_ttyd(sid, ct, port, login_user(start))
+            now = time.time()
+            box_pid[ct] = pids.get(sid, "")
+            sessions[sid] = {"ct": ct, "port": port, "proc": proc, "created": now, "last": now,
+                             "start": start, "passes": {}, "drop": drop, "note": note,
+                             "image": await container_image(ct)}
+        finally:
+            in_flight.discard(ct)
         save_state()
         log.info("provisioned sid=%s ct=%s port=%d start=level%d dropped=%d (%d/%d)",
                  sid[:12], ct, port, start, len(drop), len(sessions), MAX_PLAYERS)
+        fill_spares()                     # replace the standby box this one used
         # give ttyd a moment to bind
         await asyncio.sleep(0.5)
         return sessions[sid]
@@ -495,8 +567,10 @@ async def reaper(app):
         while True:
             await asyncio.sleep(30)
             common.live_image = await image_fingerprint(BASE_IMAGE) or common.live_image
+            await drop_outdated_spares()
             await record_finishers()      # capture victories before reaping
             await sweep_orphans()         # GC containers nobody is tracking
+            fill_spares()
             now = time.time()
             for sid, s in list(sessions.items()):
                 if now - s["last"] > IDLE_SEC:
@@ -820,6 +894,10 @@ async def on_start(app):
     if sessions:
         log.info("re-adopted %d live session(s) after restart", len(sessions))
     save_state()
+    # Standby boxes aren't saved across a restart: the sweep deletes the old
+    # ones and new ones are started.
+    await sweep_orphans()
+    fill_spares()
     app["reaper"] = asyncio.create_task(reaper(app))
     # Metrics on their own localhost-only port: play.barrypekerman.com can't reach them.
     app["metrics_runner"] = web.AppRunner(make_metrics_app())

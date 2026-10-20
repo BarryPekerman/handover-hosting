@@ -1,7 +1,7 @@
 #!/bin/bash
 # End-to-end spawner check against bandit-wannabe's Vagrant VM (make local-up
 # there first): real spawner + ttyd + tmux, with a fake `incus` that forwards
-# into the VM. Runs the eight scenarios in scenarios.sh, then cleans up.
+# into the VM. Runs the nine scenarios in scenarios.sh, then cleans up.
 # Exits non-zero if any check failed (or there is no VM).
 #   PYTHON=<python with aiohttp>  BANDIT=<path to bandit-wannabe>  tests/vm/run.sh
 set -euo pipefail
@@ -23,7 +23,7 @@ cleanup() {
 }
 trap cleanup EXIT
 PATH=$HERE/bin:$PATH SESSION_SECRET=testsecret LISTEN_PORT=8099 TTYD_PORT_BASE=8190 METRICS_PORT=9199 \
-  STATE_FILE=$HANDOVER_VM_STATE/state.json LEADERBOARD_DB=$HANDOVER_VM_STATE/lb.db LAUNCH_LOCK=$HANDOVER_VM_STATE/launch.lock \
+  STATE_FILE=$HANDOVER_VM_STATE/state.json LEADERBOARD_DB=$HANDOVER_VM_STATE/lb.db LAUNCH_LOCK=$HANDOVER_VM_STATE/launch.lock WARM_SPARES=1 \
   "$PYTHON" "$HERE/../../spawner/spawner.py" > "$HANDOVER_VM_STATE/spawner.log" 2>&1 &
 SPAWNER=$!
 up=""

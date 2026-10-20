@@ -38,7 +38,7 @@ All three build their own `.venv` on first use.
   passwords win over what the browser had. Skipped only where neither runtime
   is installed; CI has Node.
 
-CI fails below 77% total coverage. `auth.py`, `metrics.py`, `common.py` and
+CI fails below 79% total coverage. `auth.py`, `metrics.py`, `common.py` and
 `gamedata.py` are at 100%; `spawner.py` is about half. What's left there is
 mostly the box lifecycle and the terminal proxy, which need Incus (the VM test
 covers those), plus the landing page text. The floor only goes
@@ -79,10 +79,12 @@ Each rewrite was checked by planting the bug it should catch (now in
 
 **`vm/run.sh`** runs against bandit-wannabe's Vagrant VM: the real spawner,
 ttyd and tmux, with `vm/bin/incus` standing in for Incus and forwarding every
-"container" into the VM. Eight scenarios: fresh play + save, resume with a good
+"container" into the VM. Nine scenarios: fresh play + save, resume with a good
 and a forged password, one box across two signed-in devices, a shared tmux
 screen, an image change with upgrade at the reached level, leaderboard ranking,
-the /metrics funnel on its localhost port, and the events table with commands.
+the /metrics funnel on its localhost port, the events table with commands, and
+standby boxes (run with `WARM_SPARES=1`: handed out, replaced, and swapped
+after the image change).
 Run it before deploying spawner changes: `make e2e` starts the VM if it isn't
 running. Every check prints ok or FAIL, and the run exits non-zero if any
 failed. Every wait has a limit (a box ready in 90 s, the image update seen in
