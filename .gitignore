@@ -49,6 +49,7 @@
 !infra/tunnel.tf
 !infra/variables.tf
 !spawner/handover-spawner.service
+!scripts/capacity.sh
 !scripts/results.py
 !spawner/auth.py
 !spawner/common.py
@@ -66,10 +67,12 @@
 !spawner/static/og.png
 !tests/README.md
 !tests/mutations.sh
+!tests/save.test.mjs
 !tests/test_auth.py
 !tests/test_metrics.py
 !tests/test_results.py
 !tests/test_routes.py
+!tests/test_save_js.py
 !tests/test_spawner.py
 !tests/vm/bin/incus
 !tests/vm/run.sh

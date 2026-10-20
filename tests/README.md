@@ -4,7 +4,8 @@
 |---|---|---|
 | `make test` | ruff + unit tests with coverage (what CI runs) | seconds |
 | `make mutate` | plants known bugs one at a time; the unit tests must catch each | ~1 min |
-| `make e2e` | the real spawner, ttyd and tmux against the Vagrant game VM | ~3 min |
+| `make e2e` | the real spawner, ttyd and tmux against the Vagrant game VM | ~1 min |
+| `scripts/capacity.sh` | on the host: how many boxes it holds (see below) | ~10 min |
 
 All three build their own `.venv` on first use.
 
@@ -29,8 +30,14 @@ All three build their own `.venv` on first use.
   missing cookie can't open a terminal or read a save, an image update resumes
   at the level reached).
 - **`test_results.py`** — the published breakdown.
+- **`save.test.mjs`** (run by `test_save_js.py` with Node or Deno) — the
+  browser's save: survives a reload, only levels 1-20 with plain passwords are
+  kept, a corrupt save or a private window reads as empty instead of breaking
+  the page, level 10 beats level 9, and the server's rejected levels and new
+  passwords win over what the browser had. Skipped only where neither runtime
+  is installed; CI has Node.
 
-CI fails below 74% total coverage. `auth.py`, `metrics.py`, `common.py` and
+CI fails below 77% total coverage. `auth.py`, `metrics.py`, `common.py` and
 `gamedata.py` are at 100%; `spawner.py` is about half. What's left there is
 mostly the box lifecycle and the terminal proxy, which need Incus (the VM test
 covers those), plus the landing page text. The floor only goes
@@ -39,9 +46,10 @@ up: raise it when coverage rises, never lower it to get a change through.
 ## Testing the tests (`mutations.sh`)
 
 Coverage says which lines ran; it doesn't say a test would notice if they were
-wrong. `make mutate` checks that: each of its 35 lines plants one realistic bug
+wrong. `make mutate` checks that (and CI runs it): each of its 41 lines plants one realistic bug
 (a forged cookie accepted, the bot check skipping the hostname, an off-by-one in
-the throttle, a resumed run ranked, sign-in on without a signing key...), runs
+the throttle, a resumed run ranked, boxes created without the launch lock, the
+browser keeping a level the server rejected...), runs
 the unit tests, and restores the code. Every bug must be **caught**; a
 **SURVIVED** line names a behaviour no test pins down. When you add a rule worth
 protecting, add a line for it. If the code a line targets changes, the line
@@ -76,4 +84,20 @@ screen, an image change with upgrade at the reached level, leaderboard ranking,
 the /metrics funnel on its localhost port, and the events table with commands.
 Run it before deploying spawner changes: `make e2e` starts the VM if it isn't
 running. Every check prints ok or FAIL, and the run exits non-zero if any
-failed.
+failed. Every wait has a limit (a box ready in 90 s, the image update seen in
+60 s, the whole run in 15 min), so a stuck spawner fails a check instead of
+hanging; there are no fixed sleeps.
+
+## Capacity (`scripts/capacity.sh`, on the host)
+
+Starts `load-N` boxes from the live image on the players' profile, in bursts
+of 10 up to 40, each with a player logged in through tmux the way ttyd does it,
+and records how long they took to come up, memory, pool use and how fast the
+spawner still answers; then every box searches the filesystem at once. The
+boxes never go through the spawner, so nothing reaches the leaderboard or the
+analytics. It refuses to start while anyone plays, stops if a player arrives or
+memory runs low, and deletes every load box on exit.
+
+    scp scripts/capacity.sh handover: && ssh handover 'bash capacity.sh 40 </dev/null'
+
+Results from 20 October 2026 are in `docs/ops-notes.md` (Capacity).
