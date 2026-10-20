@@ -147,10 +147,15 @@ dropped. So the per-box limits are sized for 60:
 **One box, the whole game** (`scripts/footprint.sh`: every level's intended
 solution run as that level's user, 20/20 solved):
 - Booted: 135 MiB; with a player logged in through tmux: 155 MiB.
-- Each `su - levelN` leaves a `systemd --user` manager behind (~13 MiB each
-  with its helper), so memory climbs by level: at the old 512 MiB limit it
-  ended at 444 MiB, but 256 MiB of that was file cache the kernel can drop.
-  Real memory was ~154 MiB (anon 92 + kernel 62).
+- Memory climbs by level in this test: at the old 512 MiB limit it ended at
+  444 MiB, but 256 MiB of that was file cache the kernel can drop. Real
+  memory was ~154 MiB (anon 92 + kernel 62). Part of the climb is each
+  login's `systemd --user` manager (~13 MiB with its helper). It exits ~10 s
+  after that login ends (logind's stop delay), and the test logs in to the
+  next level faster than that, so it overstates a real player, whose
+  managers live only while those logins are open. Masking `user@` or
+  dropping `pam_systemd` was tried in a box and rejected: it logs errors, and
+  `pam_systemd` provides the per-user slice limits.
 - Squeezed to 256 MiB: still 20/20, peak 231 MiB, `oom_kill 0`, but the
   kernel freed cache 428 times (`memory.events high`). Too tight to be the
   limit; 320 MiB leaves ~90 MiB over that peak.
