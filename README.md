@@ -56,9 +56,9 @@ run: `ansible-playbook -i <host>, -u ubuntu --private-key <key> host/site.yml --
 - The `isolated` profile: no NIC, per-player caps, guest API off.
   ```
   incus profile create isolated
-  incus profile device add isolated root disk pool=games path=/ size=1536MiB   # base image + ~560 MiB
+  incus profile device add isolated root disk pool=games path=/ size=1400MiB   # base image + ~420 MiB
   incus profile device add isolated eth0 none
-  incus profile set isolated limits.cpu.allowance=50% limits.memory=512MiB limits.processes=300
+  incus profile set isolated limits.cpu.allowance=50% limits.memory=320MiB limits.processes=300
   incus profile set isolated security.guestapi=false security.idmap.isolated=true
   ```
 - The game image as alias `handover`. It is **not built here**: `bandit-wannabe`'s

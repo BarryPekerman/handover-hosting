@@ -48,6 +48,7 @@
 !infra/variables.tf
 !spawner/handover-spawner.service
 !scripts/capacity.sh
+!scripts/footprint.sh
 !scripts/results.py
 !spawner/auth.py
 !spawner/common.py
