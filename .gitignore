@@ -43,7 +43,6 @@
 !infra/hostkey.tf
 !infra/main.tf
 !infra/metrics.tf
-!infra/portfolio.tf
 !infra/network.tf
 !infra/terraform.tfvars.example
 !infra/tunnel.tf
@@ -65,6 +64,8 @@
 !spawner/static/favicon.png
 !spawner/static/og.png
 !tests/README.md
+!tests/test_auth.py
+!tests/test_metrics.py
 !tests/test_results.py
 !tests/test_spawner.py
 !tests/vm/bin/incus
