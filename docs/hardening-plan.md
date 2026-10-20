@@ -51,7 +51,7 @@ what's done when it's done.
 
 ## 5. Smaller fixes
 
-- [x] **5a. Disk overcommit:** quota is now 1.5 GiB. Correction (2026-10-19): the limit applies to *referenced* data incl. the ~0.95 GiB shared image, so the earlier 1 GiB left players only ~50 MiB, and 512 MiB stopped boxes from starting. Pool usage is the exclusive part (~50 MiB/box, ≤ ~560 MiB). 20 seats × 2 GiB quota = 40 GiB on a 30 GiB pool.
+- [x] **5a. Disk overcommit:** quota is now 1.5 GiB. Correction (2026-10-19): the limit applies to *referenced* data incl. the ~0.95 GiB shared image, so the earlier 1 GiB left players only ~50 MiB, and 512 MiB stopped boxes from starting. Pool usage is the exclusive part (~50 MiB/box, ≤ ~560 MiB). 20 seats × 2 GiB quota = 40 GiB on a 30 GiB pool. Update (2026-10-20): 60 seats, 1400 MiB quota (~420 MiB writable): 60 × 420 MiB + the image ≈ 26 GiB.
   Measure real per-container usage, then size the pool or the quota so they fit.
 - [~] **5b. Leaderboard audit:** found a 0-second finish (straight to `dave`); runs that skip levels are now unranked (deployed). Old bogus row: pending decision. rows written before the `_EXE` fix may be forged.
 - [x] **5c. One branch:** done; `local-rebuild` deleted, bandit-wannabe works on `main`.

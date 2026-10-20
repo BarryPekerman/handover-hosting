@@ -24,7 +24,11 @@
     isolated_profile:
       config:
         limits.cpu.allowance: 50%
-        limits.memory: 512MiB
+        # 60 players x 320 MiB = 18.75 GiB of the host's 23.4 GiB, so even
+        # every box at its limit can't run the host (no swap) out of memory.
+        # A whole game played in one box peaks at 231 MiB even squeezed to
+        # 256 MiB (measured 2026-10-20, scripts/footprint.sh).
+        limits.memory: 320MiB
         limits.processes: "300"
         # The game never uses /dev/incus/sock; it would leak the host name.
         security.guestapi: "false"
@@ -35,10 +39,10 @@
         eth0: { type: none }        # no NIC: isolation by absence
         # btrfs enforces this on what the box *references*, which includes the
         # ~0.95 GiB base image it shares with every box. So the size is base +
-        # the player's room: 1.5 GiB leaves ~560 MiB writable (measured). On
-        # disk a box only adds its own writes (~50 MiB typical), so 40 x 560
-        # MiB worst case + one base image fits the 30 GiB pool.
-        root: { path: /, pool: games, size: 1536MiB, type: disk }
+        # the player's room: 1400 MiB leaves ~420 MiB writable. On disk a box
+        # only adds its own writes (a whole game: 93 MiB), so 60 x 420 MiB
+        # worst case + one base image (~26 GiB) fits the 30 GiB pool.
+        root: { path: /, pool: games, size: 1400MiB, type: disk }
 
   handlers:
     - name: Apply sysctls

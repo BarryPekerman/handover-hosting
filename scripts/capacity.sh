@@ -19,18 +19,20 @@
 # arrives or free memory drops under MIN_FREE_MB, and deletes every load box
 # on any exit.
 #
-#   bash capacity.sh [TARGET=40]      STEP=10 MIN_FREE_MB=3072
+#   bash capacity.sh [TARGET=60]      STEP=10 MIN_FREE_MB=3072
 set -uo pipefail
-TARGET=${1:-40}
+TARGET=${1:-60}
 STEP=${STEP:-10}
 MIN_FREE_MB=${MIN_FREE_MB:-3072}
 IMAGE=${IMAGE:-handover}
 PROFILE=${PROFILE:-isolated}
 LAUNCH_LOCK=${LAUNCH_LOCK:-/run/lock/handover-launch}
-BOX_LIMIT_MB=512                      # the isolated profile's limits.memory
+# the profile's limits.memory, in MiB (e.g. 320MiB, 1GiB)
+BOX_LIMIT_MB=$(incus profile get "$PROFILE" limits.memory | awk '/GiB$/{print int($1) * 1024; next} {print int($1)}')
 OUT=~/capacity-$(date -u +%Y%m%dT%H%MZ).txt
 WORK=$(mktemp -d)
 HOLDERS=()
+starting=()
 
 say() { echo "$*" | tee -a "$OUT"; }
 avail_mb() { awk '/^MemAvailable/{print int($2/1024)}' /proc/meminfo; }
@@ -49,9 +51,17 @@ print(int(sum((i.get("state") or {}).get("memory", {}).get("usage", 0)
 
 cleanup() {
   local n
+  # Boxes still being created when the run is stopped appear only after the
+  # first pass, and a box mid-start can't be deleted yet: let the creates
+  # finish, then delete until none are left (at most ~2 min).
+  wait "${starting[@]}" 2>/dev/null
   n=$(load_boxes | wc -l)
   [ "$n" -gt 0 ] && echo "cleaning up $n load boxes..."
-  load_boxes | xargs -r -n1 -P8 incus delete -f
+  for _ in $(seq 24); do
+    load_boxes | xargs -r -n1 -P8 incus delete -f 2>/dev/null
+    [ -z "$(load_boxes)" ] && break
+    sleep 5
+  done
   for p in "${HOLDERS[@]}"; do pkill -P "$p" 2>/dev/null; kill "$p" 2>/dev/null; done
   pkill -f '[i]ncus exec load-' 2>/dev/null
   rm -rf "$WORK"
