@@ -60,7 +60,8 @@ top. Not player-facing.
   through (`infra/metrics.tf`). Alerts go to Telegram; the "The Handover"
   Grafana dashboard is in `oke-gitops`, served at
   https://ctf-monitor.barrypekerman.com (tunnel `oke-grafana` from a cloudflared
-  in the cluster, `infra/grafana.tf`; Access: your email). Counters restart with the spawner; a
+  in the cluster; tunnel, DNS and Access live in `oci-oke-infra` `terraform/grafana.tf`,
+  with the cluster, since 2026-10-20; Access: your email). Counters restart with the spawner; a
   box's counted levels are kept in the state file, so a restart doesn't count
   them twice.
 - **Secrets:** `/home/ubuntu/handover-spawner.env` (git-ignored, host-only):
