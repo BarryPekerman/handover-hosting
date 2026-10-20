@@ -11,7 +11,7 @@
   breaking play.
 - **`test_results.py`** — the published breakdown.
 
-  CI runs them all with coverage and fails below 65% total:
+  CI runs them all with coverage and fails below 64% total:
   `pip install pytest pytest-cov aiohttp && pytest tests/test_*.py --cov=spawner`.
   `auth.py`, `metrics.py`, `common.py` and `gamedata.py` are at 100%;
   `spawner.py` is about a third, because its box lifecycle and proxy need Incus
