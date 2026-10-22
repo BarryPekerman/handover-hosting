@@ -9,8 +9,7 @@ Creates, in the tenancy's root:
 | user `handover-images-ci` + group + policy | the game repo's CI: objects in the `handover-images` bucket, nothing else |
 
 Both users are API-key only: no console password, auth tokens, DB or OAuth2
-client credentials or other
-credentials.
+client credentials, or other credentials.
 
 **Run by an admin from a laptop, never from CI.** This is the one place admin
 rights are used, so the admin key stays on the admin's disk: the provider reads
