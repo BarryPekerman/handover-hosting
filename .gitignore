@@ -11,6 +11,8 @@
 !host/
 !host/deploy-keys/
 !infra/
+!infra-iam/
+!infra-iam/keys/
 !scripts/
 !spawner/
 !spawner/pages/
@@ -35,6 +37,12 @@
 !host/deploy-keys/bandit-wannabe.pub
 !host/deploy-keys/handover-hosting.pub
 !host/site.yml
+!infra-iam/README.md
+!infra-iam/iam.tf
+!infra-iam/main.tf
+!infra-iam/variables.tf
+!infra-iam/terraform.tfvars.example
+!infra-iam/keys/handover-images-ci.pub.pem
 !infra/README.md
 !infra/cloud-init.yaml.tftpl
 !infra/cloudflare.tf
