@@ -58,7 +58,7 @@ everything after them is code.**
    reaches the box through `handover-ssh` with the service token; port 22
    stays closed. On a new box `DEPLOY_KNOWN_HOSTS` must be updated to its
    host key first (`ssh handover` from a laptop shows it).
-3. `gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<latest passing ci on main>`.
+3. `gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe`: the newest tested image from the `handover-images` bucket (`-f run_id=<id>` for an older stored one).
 4. Restore the leaderboard from the newest `backup.yml` artifact (docs/ops-notes.md).
 
 Measured in the drill (2026-10-19, instance only): destroy 2m15s, create
