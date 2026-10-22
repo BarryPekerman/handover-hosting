@@ -3,8 +3,8 @@ name: rebuild
 # The whole host, from code, in one approval:
 #   gh workflow run rebuild.yml -R BarryPekerman/handover-hosting
 # infra (terraform apply) -> reach (tunnel up, ssh works) -> host (deploy.yml:
-# playbook + spawner) -> image (bandit-wannabe's deploy-image with its latest
-# passing ci run on main) -> verify. Safe on a healthy host too: each step is
+# playbook + spawner) -> image (bandit-wannabe's deploy-image: the newest
+# tested image in the handover-images bucket) -> verify. Safe on a healthy host too: each step is
 # idempotent (a no-op plan, an image that's already live).
 #
 # Two runs, one click: GitHub hands a run its secrets when it starts, and the
@@ -95,20 +95,13 @@ jobs:
       GH_TOKEN: ${{ secrets.REBUILD_GH_TOKEN }}   # Actions read/write on bandit-wannabe only
       REPO: BarryPekerman/bandit-wannabe
     steps:
-      # The newest passing build of main whose image artifact still exists
-      # (artifacts expire); none -> build one now and wait for its tests.
+      # deploy-image with no run_id ships the newest image bandit-wannabe's ci
+      # stored in the handover-images bucket (infra/storage.tf). If the bucket
+      # has none (its "Pick" step failed), build one now, tests included, and
+      # ship that; any other failure fails the rebuild.
       - name: Ship bandit-wannabe's latest tested image
         run: |
-          newest_with_image() {
-            for id in $(gh run list -R "$REPO" -w ci.yml -b main -L 30 --json databaseId,conclusion,event \
-                -q '.[] | select(.conclusion == "success" and .event != "pull_request") | .databaseId'); do
-              if [ "$(gh api "repos/$REPO/actions/runs/$id/artifacts" \
-                    -q '[.artifacts[] | select(.name == "handover-image" and (.expired | not))] | length')" -gt 0 ]; then
-                echo "$id"; return
-              fi
-            done
-          }
-          start_and_wait() {   # <workflow> [-f k=v...]: dispatch on main, wait, print the run id
+          start_and_wait() {   # <workflow> [-f k=v...]: dispatch on main, wait, print the run id (also on failure)
             local wf=$1; shift
             local before id
             before=$(gh run list -R "$REPO" -w "$wf" -L 1 --json databaseId -q '.[0].databaseId // 0')
@@ -120,16 +113,20 @@ jobs:
             done
             [ "$id" != "$before" ] || { echo "::error::$wf didn't start" >&2; exit 1; }
             echo "$wf: https://github.com/$REPO/actions/runs/$id" >&2
-            gh run watch "$id" -R "$REPO" --exit-status >&2
             echo "$id"
+            gh run watch "$id" -R "$REPO" --exit-status >&2 || return 1
           }
-          run_id=$(newest_with_image)
-          if [ -z "$run_id" ]; then
-            echo "no unexpired tested image on main: building one (tests included)"
-            run_id=$(start_and_wait ci.yml)
+          failed_step() {   # <run id>: name of the first failed step
+            gh run view "$1" -R "$REPO" --json jobs -q '[.jobs[].steps[] | select(.conclusion == "failure") | .name][0] // ""'
+          }
+          if ! id=$(start_and_wait deploy-image.yml); then
+            if [ -z "$id" ] || [ "$(failed_step "$id")" != "Pick the stored image" ]; then
+              echo "::error::deploy-image failed"; exit 1
+            fi
+            echo "no stored tested image: building one (tests included)"
+            start_and_wait ci.yml >/dev/null
+            start_and_wait deploy-image.yml >/dev/null
           fi
-          echo "image from ci run $run_id"
-          start_and_wait deploy-image.yml -f run_id="$run_id" >/dev/null
 
   verify:
     needs: image
