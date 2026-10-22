@@ -140,6 +140,48 @@ resource "oci_identity_policy" "images_ci" {
   }
 }
 
+# --- The rest of "API key only" ---
+# oci_identity_user_capabilities_management (oracle/oci 6.37) can't switch off
+# DB credentials and OAuth2 client credentials, and a new identity-domain user
+# gets both, which would let the key's holder mint itself more credentials.
+# So both are switched off through the domain's SCIM API, by the admin running
+# this (needs the oci CLI). Runs once per user; re-run with
+# `terraform apply -replace='terraform_data.api_key_only["<user>"]'`.
+
+data "oci_identity_domains" "default" {
+  compartment_id = var.tenancy_ocid
+  display_name   = "Default"
+}
+
+resource "terraform_data" "api_key_only" {
+  for_each = {
+    (oci_identity_user.terraform.name) = oci_identity_user.terraform.id
+    (oci_identity_user.images_ci.name) = oci_identity_user.images_ci.id
+  }
+  triggers_replace = [each.value]
+
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    environment = {
+      OCI_CLI_PROFILE        = var.oci_profile
+      SUPPRESS_LABEL_WARNING = "True"
+      ENDPOINT               = data.oci_identity_domains.default.domains[0].url
+      USER_NAME              = each.key
+    }
+    command = <<-EOT
+      set -euo pipefail
+      cap=urn:ietf:params:scim:schemas:oracle:idcs:extension:capabilities:User
+      id=$(oci identity-domains users list --endpoint "$ENDPOINT" --filter "userName eq \"$USER_NAME\"" \
+        --query 'data.resources[0].id' --raw-output)
+      oci identity-domains user patch --endpoint "$ENDPOINT" --user-id "$id" \
+        --schemas '["urn:ietf:params:scim:api:messages:2.0:PatchOp"]' \
+        --operations "[{\"op\":\"replace\",\"path\":\"$cap:canUseDbCredentials\",\"value\":false},
+                       {\"op\":\"replace\",\"path\":\"$cap:canUseOAuth2ClientCredentials\",\"value\":false}]" >/dev/null
+      echo "$USER_NAME: DB and OAuth2 client credentials off"
+    EOT
+  }
+}
+
 # The values the game repo's CI needs (its OCI_CLI_* secrets; README.md).
 output "images_ci" {
   value = {

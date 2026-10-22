@@ -8,7 +8,8 @@ Creates, in the tenancy's root:
 | user `tf-handover` + group `handover-terraform` + policy | Terraform Cloud's runs of `../infra`: instances, boot volumes, security lists and buckets in `handover`; use the tenancy's subnet; read the Object Storage namespace. No IAM |
 | user `handover-images-ci` + group + policy | the game repo's CI: objects in the `handover-images` bucket, nothing else |
 
-Both users are API-key only: no console password, auth tokens or other
+Both users are API-key only: no console password, auth tokens, DB or OAuth2
+client credentials or other
 credentials.
 
 **Run by an admin from a laptop, never from CI.** This is the one place admin
@@ -19,7 +20,8 @@ a profile from `~/.oci/config`, and the Terraform Cloud workspace
 
 ## Setup (once)
 
-1. An admin API key in `~/.oci/config` (any profile name).
+1. An admin API key in `~/.oci/config` (any profile name), and the `oci` CLI
+   (two capabilities the provider can't set go through it; `iam.tf`).
 2. Terraform Cloud: workspace `handover-iam` in org `berries-handover`, project
    `handover`, execution mode **Local**; `terraform login`.
 3. The CI key pair. The private half never enters the repo or the state:
