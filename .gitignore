@@ -51,6 +51,7 @@
 !infra/main.tf
 !infra/metrics.tf
 !infra/network.tf
+!infra/storage.tf
 !infra/terraform.tfvars.example
 !infra/tunnel.tf
 !infra/variables.tf

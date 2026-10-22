@@ -18,11 +18,12 @@ so the repo's token can't reach anything else), project `handover`,
 workspace `handover-infra` (remote execution, working directory `infra`).
 Terraform authenticates as **`tf-handover`**, an API-key-only OCI user in group
 `handover-terraform`. Its policy (`handover-terraform`) allows managing
-instances and boot volumes in compartment **`handover`**, and using the
-tenancy's one subnet. Nothing else: no IAM, no network changes, nothing outside
-the compartment. The user, group, policy and compartment are code too, in
-[`../infra-iam`](../infra-iam/README.md), applied by an admin from a laptop. Its key and the OCIDs are workspace variables, so nothing
-here needs `~/.oci` or `~/.ssh`.
+instances, boot volumes and the game-image bucket (`storage.tf`) in
+compartment **`handover`**, and using the tenancy's one subnet. Nothing else:
+no IAM, no network changes, nothing outside the compartment. The user, group,
+policy and compartment are code too, in [`../infra-iam`](../infra-iam/README.md),
+applied by an admin from a laptop. Its key and the OCIDs are workspace
+variables, so nothing here needs `~/.oci` or `~/.ssh`.
 
 Runs go through GitHub (`.github/workflows/terraform.yml`):
 
@@ -46,7 +47,7 @@ everything after them is code.**
 | OCI | Tenancy and an admin API key; then apply [`../infra-iam`](../infra-iam/README.md) (compartment `handover`, `tf-handover`, `handover-images-ci`, their groups and policies) and give `tf-handover` an API key | The VCN/subnet (`Basic-VCN`) are referenced, not managed |
 | Terraform Cloud | Org `berries-handover`, project `handover`; workspace `handover-infra` (remote execution, working directory `infra`, auto-apply off) and workspace `handover-iam` (local execution: state only) | Workspace vars: `tenancy_ocid`, `user_ocid`, `fingerprint`, `private_key` (sensitive), `compartment_ocid`, `availability_domain`, `subnet_ocid`, `ssh_public_key`; env `CLOUDFLARE_API_TOKEN` and `GITHUB_TOKEN` (both sensitive); owners team token → `TF_API_TOKEN` in this repo |
 | GitHub token for Terraform | Fine-grained PAT `terraform-handover-secrets`: Secrets read/write on handover-hosting + bandit-wannabe only | Every plan reads the secrets below, so renew it before it expires (2027-10-09) |
-| GitHub | Both repos and the secrets Terraform doesn't write | handover-hosting: `TF_API_TOKEN`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`, `TURNSTILE_SECRET`, `GH_CLIENT_SECRET`, `SESSION_SECRET`, `BACKUP_PASSPHRASE`. bandit-wannabe: `HANDOVER_CREDENTIALS`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`. **Written by Terraform** (github.tf): `CF_ACCESS_CLIENT_ID/SECRET` in both, `CF_TUNNEL_TOKEN` in handover-hosting |
+| GitHub | Both repos and the secrets Terraform doesn't write | handover-hosting: `TF_API_TOKEN`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`, `TURNSTILE_SECRET`, `GH_CLIENT_SECRET`, `SESSION_SECRET`, `BACKUP_PASSPHRASE`. bandit-wannabe: `HANDOVER_CREDENTIALS`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`, `OCI_CLI_USER`, `OCI_CLI_TENANCY`, `OCI_CLI_FINGERPRINT`, `OCI_CLI_KEY_CONTENT` (handover-images-ci). **Written by Terraform** (github.tf, storage.tf): `CF_ACCESS_CLIENT_ID/SECRET` in both, `CF_TUNNEL_TOKEN` in handover-hosting, `OCI_IMAGES_NAMESPACE` in bandit-wannabe |
 
 ### Order
 
