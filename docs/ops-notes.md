@@ -243,6 +243,19 @@ ssh handover 'sudo install -o handover -g handover -m 600 /tmp/handover-leaderbo
 The live level passwords are not in it (they're the `HANDOVER_CREDENTIALS`
 secret; readable copy: `~/handover-live-credentials.tgz` on the admin laptop).
 
+## Credentials that expire
+
+`credential-expiry.yml` runs on the 1st of each month and goes red 45 days
+before any of these (dates in the workflow, conservative: made + 1 year):
+
+| Expires | Credential | Breaks | Rotate |
+|---|---|---|---|
+| 2027-10-09 | GitHub fine-grained PAT, HCP workspace variable `GITHUB_TOKEN` | every Terraform plan | New PAT (Secrets read/write on handover-hosting and bandit-wannabe), paste it into the workspace variable |
+| 2027-10-18 | Access service token `handover-ci-tf` | deploy, backup, rebuild (CI can't SSH through Access) | A Terraform run replacing `cloudflare_zero_trust_access_service_token.ci` (HCP: Start new run, Replace). `infra/github.tf` writes the new id and secret into both repos' Actions secrets |
+| 2027-10-19 | Access service token `oke-prometheus` | scraping and Grafana's player view; both Handover "down" alerts fire while the host is fine | A Terraform run replacing `cloudflare_zero_trust_access_service_token.prometheus`; read outputs `prometheus_access_client_id`/`_secret`, put them in oke-gitops `monitoring/manifests/prometheus-cf-access.enc.yaml` (SOPS, encrypt on the laptop), merge, then restart Grafana (it reads them as env at start) |
+
+After rotating, set the new date in `.github/workflows/credential-expiry.yml`.
+
 ## Gameplay data and closing the game
 
 Players are told on the landing and story pages that their session is recorded:
@@ -361,6 +374,9 @@ which it ignores.)
 - **Seat behaviour under real load** (squatting, cap at 20, 60-min reclaim).
 
 ## Change log
+
+- **2026-10-23:** `credential-expiry.yml`: monthly check, red 45 days before
+  the PAT or either Access service token expires (see Credentials that expire).
 
 - **2026-10-23:** kernel surface for players: no user namespaces in boxes,
   io_uring for host root only, bpf/userfaultfd sysctls pinned (see Hardening
