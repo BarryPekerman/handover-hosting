@@ -62,8 +62,9 @@ Environment=IDLE_MIN=15
 Environment=MAX_LIFETIME_MIN=1440
 # Turnstile sitekey + secret come from Terraform via deploy.yml, in the env
 # file below (root-only; systemd reads it before dropping to `handover`). The
-# leading '-' means "optional, don't fail if absent" so the service still
-# starts before it is placed.
+# leading '-' lets systemd start the unit before the file is placed, but the
+# spawner itself exits without TURNSTILE_SECRET (no running without the bot
+# check), so on a fresh host it comes up once deploy.yml writes the file.
 # GitHub OAuth client id is public; the secret + SESSION_SECRET are in the env file.
 Environment=GH_CLIENT_ID=Ov23liyV2xQUpVi7OWOC
 EnvironmentFile=-/etc/handover/spawner.env

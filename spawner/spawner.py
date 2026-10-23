@@ -48,6 +48,7 @@ import os
 import re
 import secrets
 import shlex
+import sys
 import time
 from aiohttp import web, ClientSession, WSMsgType, WSCloseCode
 
@@ -64,7 +65,7 @@ from metrics import (
 )
 from auth import (
     TS_ACTION, TS_SECRET, TS_SITEKEY, client_ip, h_callback, h_login, h_logout, identity,
-    oauth_ready, owns, player_id, remember, resolve_sid, throttled, verify_turnstile,
+    oauth_ready, owns, player_id, remember, resolve_sid, same_origin, throttled, verify_turnstile,
     with_cookie, with_pid,
 )
 
@@ -783,6 +784,8 @@ async def h_proxy(request):
     upstream = f"http://127.0.0.1:{s['port']}{request.rel_url}"
 
     if request.headers.get("Upgrade", "").lower() == "websocket":
+        if not same_origin(request):    # another site's page using the player's cookie
+            return web.Response(status=403, text="cross-site terminal")
         # heartbeat: ping the browser every 30 s. Cloudflare closes a WebSocket
         # with no traffic for 100 s, so a player who stopped typing to read
         # lost the terminal every ~2 minutes.
@@ -959,6 +962,11 @@ def make_app():
 
 
 if __name__ == "__main__":
+    # Without the secret the bot check passes everything; deploy.yml refuses to
+    # ship without it, and this catches a hand-edited env file.
+    if not TS_SECRET and os.environ.get("ALLOW_NO_TURNSTILE") != "1":
+        sys.exit("TURNSTILE_SECRET is not set: not running without the bot check "
+                 "(ALLOW_NO_TURNSTILE=1 for local tests)")
     # shutdown_timeout is a backstop: even if a socket won't close, give up
     # fast instead of hanging out the full systemd stop-timeout.
     web.run_app(make_app(), host=LISTEN_HOST, port=LISTEN_PORT, shutdown_timeout=5.0)
