@@ -23,7 +23,8 @@ joins the box's one tmux session, so devices share a screen.
 
 Split across modules next to this file: common.py (settings, shared state,
 database), auth.py (who a visitor is), metrics.py (Prometheus and Grafana's
-player data), gamedata.py (gameplay numbers), pages/ (the HTML).
+player data), gamedata.py (gameplay numbers), headers.py (CSP and the other
+security headers), pages/ (the HTML).
 
 Config via env (all optional; secrets come from the EnvironmentFile):
   LISTEN_HOST=127.0.0.1  LISTEN_PORT=8080   PUBLIC_URL=https://play.barrypekerman.com
@@ -53,6 +54,7 @@ import time
 from aiohttp import web, ClientSession, WSMsgType, WSCloseCode
 
 import common
+import headers
 from common import (
     BASE_IMAGE, IDLE_SEC, LAUNCH_LOCK, LISTEN_HOST, LISTEN_PORT, LOGIN_USER, MAX_LIFE, MAX_PLAYERS,
     WARM_SPARES, in_flight, spares,
@@ -299,9 +301,10 @@ async def sweep_orphans():
 
 
 
-def spinner(sid: str):
+def spinner(request, sid: str):
     """The "spinning up" page, which polls /ready and then opens the terminal."""
-    return with_cookie(web.Response(text=SPAWNING.replace("__SID__", sid),
+    text = headers.nonced(request, SPAWNING).replace("__SID__", sid)
+    return with_cookie(web.Response(text=text,
                                     content_type="text/html"), sid)
 
 
@@ -642,7 +645,7 @@ TS_FAIL = message_page("Are you human?", "couldn't verify you",
 
 async def h_landing(request):
     if TS_SITEKEY:
-        script = ('<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"'
+        script = ('<script nonce="__NONCE__" src="https://challenges.cloudflare.com/turnstile/v0/api.js"'
                   ' async defer></script>')
         widget = (f'<div class="cf-turnstile" data-sitekey="{TS_SITEKEY}"'
                   f' data-action="{TS_ACTION}" data-theme="dark"></div>')
@@ -668,7 +671,9 @@ async def h_landing(request):
         lvl = reached_level(sessions[sid])
         signin = ('<b>Dave\'s box got an update.</b> Press play to continue on the new version'
                   + (f" at level {lvl}" if lvl else "") + ".<br>" + signin)
-    page = (LANDING.replace("__TS_SCRIPT__", script)
+    # The nonce goes in before anything a player could influence (the sign-in
+    # line has their GitHub name), so an injected <script> never gets it.
+    page = (headers.nonced(request, LANDING.replace("__TS_SCRIPT__", script))
                    .replace("__TS_WIDGET__", widget)
                    .replace("__SIGNIN__", signin)
                    .replace("__SAVE_JS__", SAVE_JS)
@@ -702,14 +707,14 @@ async def h_play(request):
                            (f"resumed you at level {lvl}" if lvl else "you're on the new version"))
         pids[sid] = pid
         start_provision(sid)
-        return with_pid(spinner(sid), pid)
+        return with_pid(spinner(request, sid), pid)
     # returning visitor (this device or another one signed in to the same
     # account) whose box is alive or starting → straight in, no new spawn
     if sid and (sid in sessions or states.get(sid) == "pending"):
         remember(sid, uid, disp)
         if sid in sessions:
             return with_pid(with_cookie(redirect(f"/app/{sid}"), sid), pid)
-        return with_pid(spinner(sid), pid)
+        return with_pid(spinner(request, sid), pid)
     ip = client_ip(request)
     form = await request.post()
     # bot check before we spend a container (no-op until the secret is configured)
@@ -725,7 +730,7 @@ async def h_play(request):
     if form.get("mode") == "resume":
         resume_req[sid] = (parse_save(form.get("save", "")), server_level(uid), "")
     start_provision(sid)
-    return with_pid(spinner(sid), pid)
+    return with_pid(spinner(request, sid), pid)
 
 
 async def h_play_get(request):
@@ -753,7 +758,7 @@ async def h_app(request):
         return redirect("/")
     if outdated(sessions[sid]):      # reload after an image deploy → offer the upgrade
         return redirect("/")
-    return web.Response(text=APP.replace("__SAVE_JS__", SAVE_JS).replace("__SID__", sid),
+    return web.Response(text=headers.nonced(request, APP).replace("__SAVE_JS__", SAVE_JS).replace("__SID__", sid),
                         content_type="text/html")
 
 
@@ -939,6 +944,7 @@ async def h_static(request):
 
 def make_app():
     app = web.Application()
+    app.on_response_prepare.append(headers.add_headers)   # CSP, HSTS, framing (headers.py)
     app.add_routes([
         web.get("/", h_landing),
         web.post("/play", h_play),      # spawning happens only on POST
