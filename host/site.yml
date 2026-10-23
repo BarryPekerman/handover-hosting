@@ -515,13 +515,23 @@
         install_recommends: false
         state: present
 
-    - name: Node exporter listens on localhost only
+    # Textfile metrics (*.prom) from this host's own jobs: the pending-reboot
+    # clock below and the nightly backup (backup.yml). Alerts in oke-gitops.
+    - name: Node exporter listens on localhost only, reads textfile metrics
       ansible.builtin.copy:
         dest: /etc/default/prometheus-node-exporter
         content: |
-          ARGS="--web.listen-address=127.0.0.1:9100"
+          ARGS="--web.listen-address=127.0.0.1:9100 --collector.textfile.directory=/var/lib/prometheus/node-exporter"
         mode: "0644"
       notify: Restart node exporter
+
+    - name: Textfile metrics directory
+      ansible.builtin.file:
+        path: /var/lib/prometheus/node-exporter
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
 
     # deploy.yml restarts the spawner after copying its code.
     - name: Spawner unit
@@ -553,8 +563,18 @@
           # needing a reboot, so steady updates would reset the clock. /run is
           # emptied at boot, so the marker goes with the reboot.
           since=/run/handover-reboot-pending-since
-          [ -f /run/reboot-required ] || { rm -f "$since"; echo "no reboot pending"; exit 0; }
+          # For the HandoverRebootOverdue alert: when the pending reboot was first
+          # seen, 0 for none. Stale after a reboot until tonight's run; the alert
+          # ignores a value older than the boot.
+          prom=/var/lib/prometheus/node-exporter/handover_reboot.prom
+          metric() {
+            m=handover_reboot_pending_since_seconds
+            printf '# HELP %s When a pending reboot was first seen (0: none).\n# TYPE %s gauge\n%s %s\n' \
+              "$m" "$m" "$m" "$1" > "$prom.tmp" && mv "$prom.tmp" "$prom"
+          }
+          [ -f /run/reboot-required ] || { rm -f "$since"; metric 0; echo "no reboot pending"; exit 0; }
           [ -f "$since" ] || date +%s > "$since"
+          metric "$(cat "$since")"
           waited_h=$(( ($(date +%s) - $(cat "$since")) / 3600 ))
           why=$(tr '\n' ' ' < /run/reboot-required.pkgs 2>/dev/null)
           players=$(curl -s -m 5 http://127.0.0.1:8080/healthz |
