@@ -31,7 +31,7 @@ background:#021;border:1px solid #33ff66;padding:.5rem .9rem;max-width:90vw;tran
 Stays in your browser &mdash; never sent to the server."></textarea>
 </aside>
 <button id=toggle>notes</button>
-<script>
+<script nonce="__NONCE__">
 var pad=document.getElementById('pad'),notes=document.getElementById('notes'),
     tg=document.getElementById('toggle'),KEY='handover-notes';
 try{pad.value=localStorage.getItem(KEY)||'';}catch(e){}

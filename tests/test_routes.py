@@ -314,3 +314,60 @@ def test_save_is_served_only_to_the_owner_and_never_cached():
 def test_ready_reports_the_box_state(setup, want):
     setup()
     assert f'"state": "{want}"' in call("GET", "/ready?sid=s1")[2]
+
+
+# ---- security headers (headers.py) -------------------------------------------
+
+def csp(h):
+    return dict(d.strip().split(" ", 1) for d in h["Content-Security-Policy"].split(";"))
+
+
+def test_pages_send_the_main_sites_security_headers():
+    for path in ("/", "/story", "/leaderboard", "/healthz", "/play"):
+        h = call("GET", path)[1]
+        assert h["Strict-Transport-Security"] == "max-age=31536000", path
+        assert h["X-Content-Type-Options"] == "nosniff", path
+        assert h["Referrer-Policy"] == "strict-origin-when-cross-origin", path
+        assert "camera=()" in h["Permissions-Policy"], path
+        assert h["X-Frame-Options"] == "DENY", path
+        p = csp(h)
+        assert p["frame-ancestors"] == "'none'" and p["object-src"] == "'none'", path
+        assert "'unsafe-inline'" not in p["script-src"], path
+
+
+def test_every_script_on_a_page_carries_that_responses_nonce(monkeypatch):
+    monkeypatch.setattr(sp, "TS_SITEKEY", "1x00000000000000000000AA")   # Turnstile's script too
+    live("s1")
+    for path, cookies in (("/", None), ("/app/s1", {common.COOKIE: "s1"})):
+        status, h, body, _ = call("GET", path, cookies=cookies)
+        nonce = csp(h)["script-src"].split("'nonce-")[1].split("'")[0]
+        assert status == 200 and body.count("<script") >= 1, path
+        assert body.count("<script") == body.count(f'<script nonce="{nonce}"'), path
+    assert "challenges.cloudflare.com/turnstile" in call("GET", "/")[2]
+    p = csp(call("GET", "/")[1])
+    assert "https://challenges.cloudflare.com" in p["script-src"] and "https://challenges.cloudflare.com" in p["frame-src"]
+
+
+def test_the_nonce_is_new_for_every_response():
+    a, b = (csp(call("GET", "/")[1])["script-src"] for _ in range(2))
+    assert a != b
+
+
+def test_the_terminal_may_be_framed_by_its_own_page_only():
+    live("s1", port=1)
+    assert "'self'" in csp(call("GET", "/app/s1", cookies={common.COOKIE: "s1"})[1])["frame-src"]
+    for headers in (None, {"Upgrade": "websocket", "Connection": "Upgrade", "Sec-WebSocket-Version": "13",
+                           "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+                           "Origin": "https://evil.barrypekerman.com"}):
+        status, h, _, _ = call("GET", "/t/s1/", cookies={common.COOKIE: "s2"} if not headers else {common.COOKIE: "s1"},
+                               headers=headers)
+        assert status == 403
+        assert h["X-Frame-Options"] == "SAMEORIGIN" and csp(h)["frame-ancestors"] == "'self'"
+        assert h["Strict-Transport-Security"] == "max-age=31536000"
+
+
+def test_a_script_that_got_in_through_a_players_name_never_gets_the_nonce():
+    finished("1", '@<script nonce="__NONCE__">x</script>', 100)
+    status, h, body, _ = call("GET", "/leaderboard")
+    nonce = csp(h)["script-src"].split("'nonce-")[1].split("'")[0]
+    assert status == 200 and nonce not in body
