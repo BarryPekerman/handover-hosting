@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """The Handover: gameplay breakdown from the spawner's events table.
 
-    python3 scripts/results.py ~/handover-leaderboard.db > results.md
+    sudo python3 scripts/results.py /var/lib/handover/handover-leaderboard.db > results.md
 
-Run it on the host (next to spawner/gamedata.py, which deploy.yml copies to ~),
+Run it on the host (next to spawner/gamedata.py, which deploy.yml copies to /opt/handover),
 or in a checkout on a copy from the nightly backup (docs/ops-notes.md). Prints
 Markdown: players, how far they got, time per level (wall clock and active),
 wrong passwords and the commands used on each level. Only totals and averages:
@@ -16,7 +16,7 @@ import sqlite3
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [os.path.join(HERE, "..", "spawner"), os.path.expanduser("~")]
+sys.path[:0] = [os.path.join(HERE, "..", "spawner"), "/opt/handover"]
 import gamedata  # noqa: E402
 
 

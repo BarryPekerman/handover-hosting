@@ -37,8 +37,10 @@ jobs:
           umask 077
           ssh handover 'set -euo pipefail
             d=$(mktemp -d); trap "rm -rf $d" EXIT
-            python3 -c "import sqlite3, sys; s = sqlite3.connect(sys.argv[1]); t = sqlite3.connect(sys.argv[2]); s.backup(t); t.close()" \
-              ~/handover-leaderboard.db "$d/handover-leaderboard.db"
+            # the DB belongs to the spawner user; read it as root, hand the copy to ubuntu
+            sudo python3 -c "import sqlite3, sys; s = sqlite3.connect(sys.argv[1]); t = sqlite3.connect(sys.argv[2]); s.backup(t); t.close()" \
+              /var/lib/handover/handover-leaderboard.db "$d/handover-leaderboard.db"
+            sudo chown ubuntu: "$d/handover-leaderboard.db"
             tar czf - -C "$d" .' > backup.tgz
           tar tzf backup.tgz > /dev/null
           echo "archive: $(stat -c %s backup.tgz) bytes, $(tar tzf backup.tgz | grep -vc '/$') files"

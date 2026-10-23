@@ -81,8 +81,9 @@ jobs:
 
       - name: Copy spawner
         run: |
-          scp spawner/*.py handover:~/
-          scp -r spawner/static spawner/pages handover:~/   # images; the web pages
+          # /opt/handover belongs to ubuntu: the spawner (user handover) reads it, can't change it
+          scp spawner/*.py handover:/opt/handover/
+          scp -r spawner/static spawner/pages handover:/opt/handover/   # images; the web pages
 
       - name: Inject secrets, restart (non-destructive)
         env:
@@ -96,9 +97,8 @@ jobs:
           # secrets travel over stdin, never in the host's process args
           printf 'TURNSTILE_SITEKEY=%s\nTURNSTILE_SECRET=%s\nGH_CLIENT_SECRET=%s\nSESSION_SECRET=%s\n' "$TK" "$TS" "$GH" "$SS" \
             | ssh handover '
-            umask 077
-            cat > /home/ubuntu/handover-spawner.env
-            chmod 600 /home/ubuntu/handover-spawner.env
+            # root-only: systemd reads it before starting the spawner as handover
+            sudo sh -c "umask 077; cat > /etc/handover/spawner.env"
             sudo systemctl restart handover-spawner
           '
 

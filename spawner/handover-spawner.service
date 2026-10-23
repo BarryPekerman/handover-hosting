@@ -4,13 +4,53 @@ After=network-online.target incus.service
 Wants=network-online.target
 
 [Service]
-User=ubuntu
-ExecStart=/usr/bin/python3 /home/ubuntu/spawner.py
+# Its own user, in no incus group: it reaches Incus with a client certificate
+# that Incus trusts for the `handover` project only (host/site.yml), so Incus
+# itself refuses privileged or nested boxes, host mounts, NICs and server
+# changes. A bug in the spawner or a ttyd (both read player traffic) gets
+# player boxes, not the host. The code in /opt/handover is not its to change.
+User=handover
+Group=handover
+ExecStart=/usr/bin/python3 /opt/handover/spawner.py
+WorkingDirectory=/var/lib/handover
 Restart=on-failure
 RestartSec=2
 # Backstop: the app closes its WebSockets on shutdown and uses a 5s
 # shutdown_timeout, so stop is near-instant; cap it hard regardless.
 TimeoutStopSec=15
+
+# Sandbox. Writable: its home (state, leaderboard, Incus client config) and
+# /run/lock, for the launch lock it shares with bandit-wannabe's image switch.
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/handover /run/lock
+PrivateTmp=yes
+# A minimal /dev: ttyd still gets its ptys
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+# Not ~@resources: the incus client (Go) raises its open-files limit at start.
+# A blocked call fails with EPERM (and shows up in the log) rather than
+# killing the process with SIGSYS.
+SystemCallErrorNumber=EPERM
+
 # tuning (override as needed)
 Environment=LISTEN_HOST=127.0.0.1
 Environment=LISTEN_PORT=8080
@@ -21,11 +61,12 @@ Environment=WARM_SPARES=3
 Environment=IDLE_MIN=15
 Environment=MAX_LIFETIME_MIN=1440
 # Turnstile sitekey + secret come from Terraform via deploy.yml, in the env
-# file below (host-only); the leading '-' means "optional, don't fail if
-# absent" so the service still starts before it is placed.
+# file below (root-only; systemd reads it before dropping to `handover`). The
+# leading '-' means "optional, don't fail if absent" so the service still
+# starts before it is placed.
 # GitHub OAuth client id is public; the secret + SESSION_SECRET are in the env file.
 Environment=GH_CLIENT_ID=Ov23liyV2xQUpVi7OWOC
-EnvironmentFile=-/home/ubuntu/handover-spawner.env
+EnvironmentFile=-/etc/handover/spawner.env
 
 [Install]
 WantedBy=multi-user.target
