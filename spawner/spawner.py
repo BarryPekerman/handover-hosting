@@ -96,9 +96,10 @@ for idx in "${!first[@]}"; do echo "$idx ${first[$idx]}"; done
 '''
 
 
-# Runs INSIDE a player container. The image's bash logs each command's name
-# (never its arguments, only names bash knows as a command) to the journal as
-# handover-cmd; journald stamps the sender's uid, which maps to the level.
+# Runs INSIDE a player container. The image's bash logs each command line (up
+# to 200 characters, with its exit status; a lone unknown word or any run of 32+
+# letters and digits as "?", so no password) to the journal as handover-cmd;
+# journald stamps the sender's uid, which maps to the level.
 CMDS_SH = r'''
 getent passwd | awk -F: '$1 ~ /^(level[0-9]+|dave)$/ {print "U", $3, $1}'
 journalctl -q -o json SYSLOG_IDENTIFIER=handover-cmd SYSLOG_IDENTIFIER=su SYSLOG_IDENTIFIER=sshd \
