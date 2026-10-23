@@ -23,7 +23,8 @@ joins the box's one tmux session, so devices share a screen.
 
 Split across modules next to this file: common.py (settings, shared state,
 database), auth.py (who a visitor is), metrics.py (Prometheus and Grafana's
-player data), gamedata.py (gameplay numbers), pages/ (the HTML).
+player data), gamedata.py (gameplay numbers), headers.py (CSP and the other
+security headers), pages/ (the HTML).
 
 Config via env (all optional; secrets come from the EnvironmentFile):
   LISTEN_HOST=127.0.0.1  LISTEN_PORT=8080   PUBLIC_URL=https://play.barrypekerman.com
@@ -53,6 +54,7 @@ import time
 from aiohttp import web, ClientSession, WSMsgType, WSCloseCode
 
 import common
+import headers
 from common import (
     BASE_IMAGE, IDLE_SEC, LAUNCH_LOCK, LISTEN_HOST, LISTEN_PORT, LOGIN_USER, MAX_LIFE, MAX_PLAYERS,
     WARM_SPARES, in_flight, spares,
@@ -938,7 +940,8 @@ async def h_static(request):
 
 
 def make_app():
-    app = web.Application()
+    app = web.Application(middlewares=[headers.nonce_scripts])
+    app.on_response_prepare.append(headers.add_headers)   # CSP, HSTS, framing (headers.py)
     app.add_routes([
         web.get("/", h_landing),
         web.post("/play", h_play),      # spawning happens only on POST

@@ -66,6 +66,7 @@
 !spawner/auth.py
 !spawner/common.py
 !spawner/gamedata.py
+!spawner/headers.py
 !spawner/metrics.py
 !spawner/spawner.py
 !spawner/pages/app.html

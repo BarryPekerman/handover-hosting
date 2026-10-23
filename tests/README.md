@@ -29,7 +29,8 @@ All three build their own `.venv` on first use.
   escaped) and who gets a box and whose terminal (a GET never starts one, the
   per-IP limit and bot check run before a box is spent, another account or a
   missing cookie can't open a terminal or read a save, an image update resumes
-  at the level reached).
+  at the level reached), and the security headers (the main site's set; every page script
+  carries that response's nonce; only /app may frame the terminal).
 - **`test_results.py`** — the published breakdown.
 - **`save.test.mjs`** (run by `test_save_js.py` with Node or Deno) — the
   browser's save: survives a reload, only levels 1-20 with plain passwords are
