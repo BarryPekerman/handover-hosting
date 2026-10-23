@@ -53,7 +53,13 @@ run: `ansible-playbook -i <host>, -u ubuntu --private-key <key> host/site.yml --
   `fs.inotify.max_user_instances=8192`.
 - A `games` btrfs pool (per-container disk quota; CoW-shares the base image):
   `incus storage create games btrfs size=30GiB`
-- The `isolated` profile: no NIC, per-player caps, guest API off.
+- The `handover` project (`restricted`, no NICs, pool disks only, isolated
+  unprivileged containers only, at most 63 boxes; images shared from the
+  default project), the Incus API on `127.0.0.1:8443`, and the `handover`
+  user with a client certificate trusted for that project only.
+- The `isolated` profile, in the `handover` project (player boxes) and the
+  default one (`switch-image.sh` warms new images with it): no NIC, per-player
+  caps, guest API off. By hand, add `--project handover` for the first:
   ```
   incus profile create isolated
   incus profile device add isolated root disk pool=games path=/ size=1400MiB   # base image + ~420 MiB
@@ -97,7 +103,14 @@ terminal page · `/t/<sid>/*` ttyd proxy · `/save/<sid>` · `/leaderboard` · `
 `/login` `/auth/callback` `/logout` · `/healthz`.
 
 Config is env (see `handover-spawner.service` and the docstring at the top of
-`spawner.py`); secrets come from `/home/ubuntu/handover-spawner.env`, written by CD.
+`spawner.py`); secrets come from `/etc/handover/spawner.env` (root-only), written by CD.
+
+**It runs as `handover`, not an Incus admin.** The spawner and the ttyds read
+player traffic, so they get only what they need: a certificate Incus trusts
+for the restricted `handover` project, where Incus itself refuses privileged
+or nested boxes, host mounts, NICs and server changes; and a systemd sandbox
+(read-only system, no home dirs, no privileges). A bug in them reaches player
+boxes, not the host. `host/site.yml` sets it all up.
 
 ### Deploying
 
