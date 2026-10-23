@@ -56,3 +56,13 @@ jobs:
           path: handover-backup-*.tgz.gpg
           retention-days: 30
           if-no-files-found: error
+
+      # For the HandoverBackupStale alert (oke-gitops): node-exporter's textfile
+      # collector publishes when the last backup was uploaded.
+      - name: Record the successful backup
+        run: |
+          ssh handover 'set -euo pipefail
+            f=/var/lib/prometheus/node-exporter/handover_backup.prom
+            printf "# HELP handover_backup_last_success_timestamp_seconds When the nightly backup was last uploaded.\n# TYPE handover_backup_last_success_timestamp_seconds gauge\nhandover_backup_last_success_timestamp_seconds %s\n" "$(date +%s)" |
+              sudo tee "$f.tmp" > /dev/null
+            sudo mv "$f.tmp" "$f"'
