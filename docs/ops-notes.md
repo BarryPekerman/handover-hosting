@@ -215,8 +215,10 @@ shape, while nobody plays (they refuse otherwise): see `tests/README.md`.
 ## Reboots
 
 Kernel updates install unattended; `handover-maybe-reboot.timer` (04:00 Israel
-time) reboots only when `/run/reboot-required` exists and `/healthz` says 0
-players, otherwise it waits for the next night. Decision without rebooting:
+time) reboots when `/run/reboot-required` exists and `/healthz` says 0
+players, otherwise it waits for the next night, but at most 72 h (counted from
+when the script first saw it, `/run/handover-reboot-pending-since`): then it
+writes a 10-minute warning into every open terminal and reboots anyway. Decision without rebooting:
 `sudo env DRY_RUN=1 /usr/local/sbin/handover-maybe-reboot`; history:
 `journalctl -t handover-reboot`. After a reboot, player containers are gone
 (they don't autostart); the spawner drops their sessions and players resume.
@@ -315,6 +317,13 @@ Strong: the spawner and every ttyd (the processes that read player traffic)
 run as `handover`, not an Incus admin: Incus trusts its certificate for the
 restricted `handover` project only, so a bug in them reaches player boxes,
 not the host (break-tested on Incus 6.0.0, 2026-10-23; see Spawner).
+Kernel surface: no user namespaces inside a box
+(`linux.sysctl.user.max_user_namespaces=0`), io_uring only for host root
+(`kernel.io_uring_disabled=1`), unprivileged bpf and userfaultfd off (pinned
+in `/etc/sysctl.d/99-handover.conf`). Not done: denying `keyctl`/`add_key`/
+`request_key` with `security.syscalls.deny` had no effect on Incus 6.0.0 in
+testing (the calls still ran), and `raw.seccomp` is barred by the restricted
+project on purpose; box root still has keyrings.
 Unprivileged containers, no network device (no egress, no cloud
 metadata), guest API off, fork-bomb/mem-bomb contained by cgroup limits, a 1400 MiB
 disk quota caps fill, 30 GiB pool is the host ceiling. Spawning gated by
@@ -341,6 +350,11 @@ which it ignores.)
 - **Seat behaviour under real load** (squatting, cap at 20, 60-min reclaim).
 
 ## Change log
+
+- **2026-10-23:** kernel surface for players: no user namespaces in boxes,
+  io_uring for host root only, bpf/userfaultfd sysctls pinned (see Hardening
+  posture). The game solved end to end with them on; running boxes pick up
+  the profile change when they're next created.
 
 - **2026-10-23:** the spawner runs as `handover` with a certificate restricted
   to the new `handover` Incus project, sandboxed by systemd, instead of as
