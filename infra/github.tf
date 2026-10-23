@@ -49,3 +49,22 @@ resource "github_actions_secret" "cf_tunnel_token" {
   secret_name = "CF_TUNNEL_TOKEN"
   value       = data.cloudflare_zero_trust_tunnel_cloudflared_token.handover.token
 }
+
+# The game repo was renamed (bandit-wannabe -> the-handover-linux-ctf). Moving
+# the state keeps each secret one resource: replaced (deleted, then created)
+# instead of an unrelated delete and create, which in either order could
+# delete the new secret through GitHub's redirect from the old name.
+moved {
+  from = github_actions_secret.cf_access_client_id["bandit-wannabe"]
+  to   = github_actions_secret.cf_access_client_id["the-handover-linux-ctf"]
+}
+
+moved {
+  from = github_actions_secret.cf_access_client_secret["bandit-wannabe"]
+  to   = github_actions_secret.cf_access_client_secret["the-handover-linux-ctf"]
+}
+
+moved {
+  from = github_actions_secret.deploy_known_hosts["bandit-wannabe"]
+  to   = github_actions_secret.deploy_known_hosts["the-handover-linux-ctf"]
+}
