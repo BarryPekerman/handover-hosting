@@ -594,7 +594,7 @@ async def reaper(app):
 # og:/twitter: tags LinkedIn, Slack and chat apps build their card from, on the
 # pages people share), then per request __SID__, __ROWS__, __SAVE_JS__ and the
 # landing page's own. The story page holds the premise rather than the front
-# page; Dave's own voice is kept for his first mail in the game (bandit-wannabe
+# page; Dave's own voice is kept for his first mail in the game (the-handover-linux-ctf
 # VOICE.md). save.js is the browser's save, {"v":1,"levels":{"<n>":"<password>"}}
 # in localStorage, read defensively: a corrupted save just loses the bad entries.
 # The images are spawner/static/.

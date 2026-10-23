@@ -6,7 +6,7 @@
 #   ansible-playbook -i <host>, -u ubuntu --private-key <key> host/site.yml --check --diff
 #
 # Not here: the spawner code, tunnel config and secrets (deploy.yml), the game
-# image (bandit-wannabe's deploy-image), the instance itself (infra/).
+# image (the-handover-linux-ctf's deploy-image), the instance itself (infra/).
 - name: Handover host
   hosts: all
   become: true
@@ -190,7 +190,7 @@
         owner: ubuntu
         group: ubuntu
         mode: "0600"
-      loop: [bandit-wannabe, handover-hosting]
+      loop: [the-handover-linux-ctf, handover-hosting]
 
     # The admin and CI login (deploy, image switch); never the spawner, which
     # runs as `handover` with a project-restricted certificate (below).
@@ -243,7 +243,7 @@
       changed_when: true
 
     # The same profile in both projects: player boxes use the handover one;
-    # bandit-wannabe's switch-image.sh warms each new image with the default
+    # the-handover-linux-ctf's switch-image.sh warms each new image with the default
     # project's.
     - name: Look for the isolated profiles
       ansible.builtin.command: incus profile show isolated --project {{ item }}

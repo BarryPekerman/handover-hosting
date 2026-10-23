@@ -16,7 +16,7 @@ LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "8080"))
 BASE_IMAGE  = os.environ.get("BASE_IMAGE", "handover")
 PROFILE     = os.environ.get("PROFILE", "isolated")
 # Every box creation on the host takes this lock (flock), here and in
-# bandit-wannabe's switch-image.sh. Incus 6.0.0 races when two boxes are created
+# the-handover-linux-ctf's switch-image.sh. Incus 6.0.0 races when two boxes are created
 # at once: with security.idmap.isolated it can hand out a uid range outside
 # root's subuid range (the box fails to start) or one another box already has.
 LAUNCH_LOCK = os.environ.get("LAUNCH_LOCK", "/run/lock/handover-launch")

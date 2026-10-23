@@ -5,7 +5,7 @@
 # these secrets, so renew it before then and update the workspace variable).
 
 locals {
-  ci_repos = toset(["handover-hosting", "bandit-wannabe"])
+  ci_repos = toset(["handover-hosting", "the-handover-linux-ctf"])
 }
 
 # The service token CI uses to get past Cloudflare Access on handover-ssh.

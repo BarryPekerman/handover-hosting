@@ -35,7 +35,7 @@ jobs:
   deploy:
     runs-on: ubuntu-24.04
     steps:
-      # Same rule as bandit-wannabe's deploy-image: only what CI passed ships.
+      # Same rule as the-handover-linux-ctf's deploy-image: only what CI passed ships.
       - name: Check this commit passed ci on main
         env:
           GH_TOKEN: ${{ github.token }}

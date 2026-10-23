@@ -2,9 +2,9 @@
 # One box's footprint while the whole game is played in it: memory (cgroup
 # current, peak, what it is, whether anything was killed) and disk (btrfs
 # exclusive). Runs ON the host, next to solutions.sh: the solution() function
-# from bandit-wannabe's tests/solve.sh (spoilers, so it isn't copied here):
+# from the-handover-linux-ctf's tests/solve.sh (spoilers, so it isn't copied here):
 #
-#   sed -n '/^solution() {/,/^}/p' ../bandit-wannabe/tests/solve.sh > /tmp/solutions.sh
+#   sed -n '/^solution() {/,/^}/p' ../the-handover-linux-ctf/tests/solve.sh > /tmp/solutions.sh
 #   scp scripts/footprint.sh /tmp/solutions.sh handover:
 #   ssh handover 'MEM=256MiB bash footprint.sh </dev/null; rm -f footprint.sh solutions.sh'
 #
