@@ -35,6 +35,11 @@
         # Each box its own uid range: per-uid host limits (inotify) aren't
         # shared across boxes, and an escape lands in no other box's uids.
         security.idmap.isolated: "true"
+        # No user namespaces inside a box: unshare -U is the usual way in to
+        # nf_tables and the other namespaced-capability kernel bugs. The game
+        # needs none (solver, leak scan and 21 nested user managers pass).
+        # Applies to boxes started after the change.
+        linux.sysctl.user.max_user_namespaces: "0"
       devices:
         eth0: { type: none }        # no NIC: isolation by absence
         # btrfs enforces this on what the box *references*, which includes the
@@ -111,6 +116,11 @@
     # Every nested `ssh levelN@localhost` starts a systemd user manager; the
     # stock 128 inotify instances run out by about level 2. ptrace_scope and
     # dmesg_restrict can't be set inside a container, so the host enforces them.
+    # The rest closes kernel interfaces exploits favour to players (box root
+    # is unprivileged on the host): io_uring only for real root (incusd uses
+    # it; ttyd falls back to plain I/O, tested), and bpf and userfaultfd pinned
+    # to Ubuntu's defaults so a changed default can't reopen them. The whole
+    # game was solved with these on (2026-10-23).
     - name: Sysctls
       ansible.builtin.copy:
         dest: /etc/sysctl.d/99-handover.conf
@@ -120,6 +130,9 @@
           fs.inotify.max_user_watches = 524288
           kernel.yama.ptrace_scope = 1
           kernel.dmesg_restrict = 1
+          kernel.io_uring_disabled = 1
+          kernel.unprivileged_bpf_disabled = 2
+          vm.unprivileged_userfaultfd = 0
       notify: Apply sysctls
 
     # SSH is key-only, so this is about log noise and connection churn.
