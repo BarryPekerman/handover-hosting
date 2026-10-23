@@ -27,6 +27,7 @@
 !.github/workflows/credential-expiry.yml
 !.github/workflows/ci.yml
 !.github/workflows/deploy.yml
+!.github/workflows/auto-deploy.yml
 !.github/workflows/rebuild.yml
 !.github/workflows/terraform.yml
 !.gitignore

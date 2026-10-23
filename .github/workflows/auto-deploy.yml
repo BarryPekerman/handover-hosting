@@ -1,0 +1,102 @@
+name: auto-deploy
+
+# Deploys main once nobody is playing, so main and production can't drift.
+# A spawner restart ends every open game (players resume from their saves), so
+# it waits for 0 players instead of deploying at once. The deploy itself is
+# deploy.yml, unchanged, with all its checks; running it by hand still works.
+#
+# Runs when ci passes on main, and every night as a retry. Deploys only if
+# spawner/ or host/ changed since the last successful deploy (deploy.yml,
+# rebuild.yml or this workflow), and only the commit at the tip of main. If
+# players stay on for the whole wait, the run fails and the next night tries
+# again; nobody is ever kicked.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: "30 1 * * *"     # early morning in Israel (03:30-04:30), the quietest hours
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  wait:
+    # ci's own result, and only a push to main (not a PR from a branch named main)
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    # A newer commit's run replaces one still waiting for players
+    concurrency:
+      group: auto-deploy-wait
+      cancel-in-progress: true
+    outputs:
+      deploy: ${{ steps.changes.outputs.deploy }}
+    steps:
+      - name: Anything to deploy?
+        id: changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          head=$(gh api "repos/$REPO/commits/main" -q .sha)
+          if [ -n "$RUN_SHA" ] && [ "$RUN_SHA" != "$head" ]; then
+            echo "ci passed for ${RUN_SHA:0:12}, but main is at ${head:0:12} now: its own ci run decides"
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # The newest successful deploy of any kind: a deploy.yml or rebuild.yml
+          # run, or an auto-deploy run whose deploy job ran (most of them skip)
+          runs() { gh api "repos/$REPO/actions/workflows/$1/runs?branch=main&status=success&per_page=$2" \
+                     -q '.workflow_runs[] | "\(.updated_at) \(.head_sha) \(.id)"' || true; }
+          last=$({ runs deploy.yml 1; runs rebuild.yml 1
+                   runs auto-deploy.yml 30 | while read -r at sha id; do
+                     gh api "repos/$REPO/actions/runs/$id/jobs" \
+                       -q '.jobs[] | select(.name | startswith("deploy")) | select(.conclusion == "success") | .name' |
+                       grep -q . && { echo "$at $sha"; break; }
+                   done; } | sort -r | head -1 | cut -d' ' -f2)
+          echo "main: ${head:0:12}, last deployed: ${last:0:12}"
+          if [ -z "$last" ]; then
+            changed=yes
+          else
+            changed=$(gh api "repos/$REPO/compare/$last...$head" --paginate -q '.files[].filename' |
+                      grep -qE '^(spawner|host)/' && echo yes || echo no)
+          fi
+          echo "spawner/ or host/ changed since: $changed"
+          echo "deploy=$([ "$changed" = yes ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Wait until nobody is playing
+        if: steps.changes.outputs.deploy == 'true'
+        run: |
+          # Up to ~5.5 h (a hosted job's limit is 6 h), checked every 2 minutes
+          for i in $(seq 160); do
+            players=$(curl -fsS --max-time 10 https://play.barrypekerman.com/healthz | jq -r .players) || players=unknown
+            [ "$players" = 0 ] && { echo "no players: deploying"; exit 0; }
+            [ $((i % 15)) = 1 ] && echo "players: $players, waiting"
+            sleep 120
+          done
+          echo "::error::players stayed on for 5.5 h; not deploying (the nightly run retries, or run deploy.yml by hand)"
+          exit 1
+
+  deploy:
+    needs: wait
+    if: needs.wait.outputs.deploy == 'true'
+    permissions:
+      contents: read
+      actions: read     # deploy.yml checks the commit passed ci
+    uses: ./.github/workflows/deploy.yml
+    secrets:
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
+      TURNSTILE_SITEKEY: ${{ secrets.TURNSTILE_SITEKEY }}
+      TURNSTILE_SECRET: ${{ secrets.TURNSTILE_SECRET }}
+      GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
