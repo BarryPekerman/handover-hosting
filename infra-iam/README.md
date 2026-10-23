@@ -7,8 +7,10 @@ Creates, in the tenancy's root:
 | compartment `handover` | holds everything of the Handover |
 | user `tf-handover` + group `handover-terraform` + policy | Terraform Cloud's runs of `../infra`: instances, boot volumes, security lists and buckets in `handover`; use the tenancy's subnet; read the Object Storage namespace. No IAM |
 | user `handover-images-ci` + group + policy | the game repo's CI: objects in the `handover-images` bucket, nothing else |
+| user `handover-backup` + group + policy | handover-hosting's `backup.yml` and `restore-test.yml`: create, list and read objects in the `handover-backups` bucket; no delete, no overwrite |
+| policy `handover-objectstorage-lifecycle` | Object Storage itself may delete expired objects in `handover-backups` (its 30-day lifecycle rule) |
 
-Both users are API-key only: no console password, auth tokens, DB or OAuth2
+All three users are API-key only: no console password, auth tokens, DB or OAuth2
 client credentials, or other credentials.
 
 **Run by an admin from a laptop, never from CI.** This is the one place admin
@@ -49,7 +51,18 @@ gh secret set OCI_CLI_FINGERPRINT -R $R --body '<images_ci.fingerprint>'
 gh secret set OCI_CLI_KEY_CONTENT -R $R < ~/.oci/handover-images-ci.pem
 ```
 
-and give `tf-handover` an API key (console: the user → API keys → add), whose
+and handover-hosting its backup identity (`terraform output backup`; key pair
+made like step 3, as `~/.oci/handover-backup.pem` and `keys/handover-backup.pub.pem`):
+
+```
+R=<owner>/handover-hosting
+gh secret set OCI_BACKUP_USER        -R $R --body '<backup.user>'
+gh secret set OCI_BACKUP_TENANCY     -R $R --body '<backup.tenancy>'
+gh secret set OCI_BACKUP_FINGERPRINT -R $R --body '<backup.fingerprint>'
+gh secret set OCI_BACKUP_KEY_CONTENT -R $R < ~/.oci/handover-backup.pem
+```
+
+Then give `tf-handover` an API key (console: the user → API keys → add), whose
 private half goes into the `handover-infra` workspace's `private_key`
 variable; its OCID and fingerprint into `user_ocid` and `fingerprint`.
 

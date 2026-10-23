@@ -2,10 +2,11 @@ name: backup
 
 # Nightly copy of what exists only on the host: the leaderboard DB. (The
 # tunnel lives in Terraform now; the host holds only its run token, which is a
-# secret.) Encrypted with BACKUP_PASSPHRASE before it leaves the runner, kept
-# as an artifact for 30 days. Not private: this repo is public, so anyone can
-# list the artifacts and any signed-in GitHub user can download them. The
-# encryption is the only protection. Restore: docs/ops-notes.md.
+# secret.) Encrypted with BACKUP_PASSPHRASE before it leaves the runner, then
+# uploaded to the private OCI bucket handover-backups (infra/storage.tf) as
+# handover-backup, which can add objects but not delete or overwrite them; the
+# bucket deletes each after 30 days. restore-test.yml checks monthly that the
+# newest one decrypts and opens. Restore: docs/ops-notes.md.
 on:
   schedule:
     - cron: "17 2 * * *"     # 02:17 UTC, a quiet hour
@@ -50,12 +51,25 @@ jobs:
             --symmetric --cipher-algo AES256 -o "handover-backup-$(date -u +%F).tgz.gpg" backup.tgz
           shred -u backup.tgz
 
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: handover-backup
-          path: handover-backup-*.tgz.gpg
-          retention-days: 30
-          if-no-files-found: error
+      - name: Install the OCI CLI (pinned)
+        run: python3 -m pip install --user "oci-cli==3.77.0"
+
+      # A new name every run (date + run id), so nothing is ever overwritten
+      - name: Upload to the backup bucket
+        env:
+          OCI_NS: ${{ secrets.OCI_BACKUP_NAMESPACE }}
+          OCI_CLI_USER: ${{ secrets.OCI_BACKUP_USER }}
+          OCI_CLI_TENANCY: ${{ secrets.OCI_BACKUP_TENANCY }}
+          OCI_CLI_FINGERPRINT: ${{ secrets.OCI_BACKUP_FINGERPRINT }}
+          OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_BACKUP_KEY_CONTENT }}
+          OCI_CLI_REGION: il-jerusalem-1
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          f=(handover-backup-*.tgz.gpg)
+          name="${f[0]%.tgz.gpg}-$RUN_ID.tgz.gpg"
+          "$HOME/.local/bin/oci" os object put -bn handover-backups -ns "$OCI_NS" --name "$name" --file "${f[0]}" --no-overwrite \
+            --metadata "{\"run-id\": \"$RUN_ID\", \"commit\": \"$GITHUB_SHA\"}" > /dev/null
+          echo "uploaded $name ($(stat -c %s "${f[0]}") bytes)"
 
       # For the HandoverBackupStale alert (oke-gitops): node-exporter's textfile
       # collector publishes when the last backup was uploaded.

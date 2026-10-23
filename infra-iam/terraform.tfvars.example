@@ -4,3 +4,4 @@ oci_profile          = "DEFAULT"          # an admin's ~/.oci/config profile
 region               = "il-jerusalem-1"   # the tenancy's home region
 tf_user_email        = "you+tf-handover@example.com"
 images_ci_user_email = "you+handover-images-ci@example.com"
+backup_user_email    = "you+handover-backup@example.com"

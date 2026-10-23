@@ -26,3 +26,8 @@ variable "images_ci_user_email" {
   description = "Email for handover-images-ci (the game repo's CI identity)"
   type        = string
 }
+
+variable "backup_user_email" {
+  description = "Email for handover-backup (the leaderboard backups' identity)"
+  type        = string
+}

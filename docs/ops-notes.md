@@ -226,16 +226,25 @@ writes a 10-minute warning into every open terminal and reboots anyway. Decision
 ## Backups
 
 `backup.yml` runs nightly (02:17 UTC): the leaderboard DB, encrypted with `BACKUP_PASSPHRASE` (a copy is in `~/handover-backup-passphrase.txt`
-on the admin laptop), kept 30 days as the `handover-backup` artifact. The repo
-is public, so the artifacts are too: anyone can list them and any signed-in
-GitHub user can download them. Only the encryption protects the raw records
-(44 random characters; if it's ever replaced, generate it, e.g.
-`openssl rand -base64 32`, never type one). Restore:
+on the admin laptop; 44 random characters; if it's ever replaced, generate it,
+e.g. `openssl rand -base64 32`, never type one), uploaded to the private OCI
+bucket `handover-backups` as `handover-backup-<date>-<run id>.tgz.gpg`. The
+bucket deletes each backup after 30 days. CI writes as `handover-backup`
+(`infra-iam`), which can add and read objects but not delete or overwrite
+them, so a leaked CI key can't destroy the backups.
+
+`restore-test.yml` runs monthly (and by hand): it decrypts the newest backup
+and opens the DB (integrity check, the three tables, row counts). Red if the
+newest is older than 36 h or anything fails.
+
+Restore (the `HANDOVER` profile is the game tenancy's admin):
 
 ```bash
-gh run download <run> -R BarryPekerman/handover-hosting -n handover-backup
-gpg --pinentry-mode loopback --passphrase-file ~/handover-backup-passphrase.txt \
-  -d handover-backup-*.tgz.gpg | tar xzf - -C restore/
+ns=$(oci os ns get --profile HANDOVER --query data --raw-output)
+oci os object list --profile HANDOVER -bn handover-backups -ns "$ns" --query 'data[].name' | tail -3   # pick the newest
+oci os object get --profile HANDOVER -bn handover-backups -ns "$ns" --name <name> --file backup.tgz.gpg
+mkdir -p restore && gpg --pinentry-mode loopback --passphrase-file ~/handover-backup-passphrase.txt \
+  -d backup.tgz.gpg | tar xzf - -C restore/
 scp restore/handover-leaderboard.db handover:/tmp/       # then, spawner stopped:
 ssh handover 'sudo install -o handover -g handover -m 600 /tmp/handover-leaderboard.db /var/lib/handover/ && rm /tmp/handover-leaderboard.db'
 ```
@@ -279,10 +288,11 @@ When the game closes:
    host, or on a restored backup). It prints totals and averages only, with no
    player ids or command lines, so it can be published as is.
 2. Delete the raw records: `sudo -u handover sqlite3 /var/lib/handover/handover-leaderboard.db 'DELETE FROM events; DELETE FROM player_ids; VACUUM;'`,
-   and delete the backup artifacts too, or the raw records outlive the promise on
-   the story page by up to 30 days:
-   `gh api --paginate 'repos/BarryPekerman/handover-hosting/actions/artifacts?name=handover-backup' -q '.artifacts[].id' | xargs -I{} gh api -X DELETE repos/BarryPekerman/handover-hosting/actions/artifacts/{}`
-   (and stop the `backup` workflow first, so the next night doesn't make a new one).
+   and empty the backup bucket too, or the raw records outlive the promise on
+   the story page by up to 30 days (the lifecycle rule's limit). Stop the
+   `backup` workflow first (`gh workflow disable backup.yml -R BarryPekerman/handover-hosting`),
+   then, as the admin (CI can't delete):
+   `oci os object bulk-delete --profile HANDOVER -bn handover-backups -ns "$(oci os ns get --profile HANDOVER --query data --raw-output)" --force`
 
 ## Known gotchas / non-bugs (seen this session)
 
