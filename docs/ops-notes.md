@@ -16,7 +16,8 @@ top. Not player-facing.
   (`handover-ssh.barrypekerman.com`, Cloudflare Access app `handover-ssh`: your
   email login in the browser about once a day; `~/.ssh/config` entry uses
   `cloudflared access ssh`). **Public port 22 is closed** at the subnet's
-  security list. Key-only; `ubuntu` is in `incus-admin`.
+  security list. Key-only; `ubuntu` is in `incus-admin` (admin and CI only;
+  the spawner is not `ubuntu`, see Spawner).
 - **Break-glass** (tunnel down): OCI console → Networking → Virtual cloud
   networks → Basic-VCN → Security Lists → Default Security List → add ingress
   TCP 22 from your IP; then `ssh -i ~/.ssh/alex_handover ubuntu@<ip>`; remove
@@ -28,11 +29,22 @@ top. Not player-facing.
   (`/etc/cloudflared/handover-tf.env`). Nothing is open inbound on the origin,
   SSH included.
 - **Spawner:** `spawner.py` plus its modules `common.py`, `auth.py`,
-  `metrics.py`, `gamedata.py` (aiohttp; all in `~`; its pages are
-  `~/pages/*.html`, read at startup, so a text edit needs a deploy/restart), systemd unit `handover-spawner`
-  (`/etc/systemd/system/handover-spawner.service`, runs as `ubuntu`,
-  `ExecStart=/home/ubuntu/spawner.py`). One per-player **Incus** container
-  (`p-<sid12>`) + its own loopback **ttyd**, reverse-proxied at `/t/<sid>/`.
+  `metrics.py`, `gamedata.py` (aiohttp; code in `/opt/handover`, owned by
+  `ubuntu`; its pages are `/opt/handover/pages/*.html`, read at startup, so a
+  text edit needs a deploy/restart), systemd unit `handover-spawner`
+  (`/etc/systemd/system/handover-spawner.service`). It runs as **`handover`**,
+  a system user in no incus group, sandboxed by systemd (read-only system,
+  no home dirs, no privileges; `systemd-analyze security handover-spawner`:
+  2.1). Its home `/var/lib/handover` holds the state file, the leaderboard and
+  its Incus client config. It reaches Incus over `https://127.0.0.1:8443` with
+  a certificate trusted for the **`handover` project only** (`incus config
+  trust list`: `handover-spawner`), and the project is `restricted`, so Incus
+  refuses privileged, nested or shared-idmap boxes, non-pool disks, NICs,
+  proxy/unix devices, `raw.lxc` and any server or project change. Player
+  boxes live in that project (`incus list --project handover`); images stay in
+  the default project, read-only from there. One per-player **Incus**
+  container (`p-<sid12>`) + its own loopback **ttyd**, reverse-proxied at
+  `/t/<sid>/`.
 - **Per-player container:** clone of the golden image `handover` on the
   `isolated` profile — no NIC, `security.guestapi=false`, CPU 50% / mem 320 MiB
   / procs 300, **1400 MiB btrfs disk quota** (counts the shared ~0.95 GiB base
@@ -73,7 +85,8 @@ top. Not player-facing.
   with the cluster, since 2026-10-20; Access: your email). Counters restart with the spawner; a
   box's counted levels are kept in the state file, so a restart doesn't count
   them twice.
-- **Secrets:** `/home/ubuntu/handover-spawner.env` (git-ignored, host-only):
+- **Secrets:** `/etc/handover/spawner.env` (root-only; systemd reads it before
+  starting the spawner as `handover`):
   `SESSION_SECRET`, `GH_CLIENT_SECRET`, `TURNSTILE_SECRET`. Tunnel creds are
   cloudflared's. Nothing sensitive is in git or the image.
 
@@ -217,7 +230,8 @@ on the admin laptop), kept 30 days as the `handover-backup` artifact. Restore:
 gh run download <run> -R BarryPekerman/handover-hosting -n handover-backup
 gpg --pinentry-mode loopback --passphrase-file ~/handover-backup-passphrase.txt \
   -d handover-backup-*.tgz.gpg | tar xzf - -C restore/
-scp restore/handover-leaderboard.db handover:~/          # spawner stopped
+scp restore/handover-leaderboard.db handover:/tmp/       # then, spawner stopped:
+ssh handover 'sudo install -o handover -g handover -m 600 /tmp/handover-leaderboard.db /var/lib/handover/ && rm /tmp/handover-leaderboard.db'
 ```
 
 The live level passwords are not in it (they're the `HANDOVER_CREDENTIALS`
@@ -229,7 +243,7 @@ Players are told on the landing and story pages that their session is recorded:
 every command line (capped at 200 characters) with its exit status, wrong
 passwords, and when each level is reached, under a random player id (`pid`
 cookie; linked to the GitHub account for signed-in players). No IPs are kept.
-It all lands in the `events` table of `~/handover-leaderboard.db` (nightly
+It all lands in the `events` table of `/var/lib/handover/handover-leaderboard.db` (nightly
 backup). The promise: publish only totals and averages, then delete the raw data.
 
 While the game runs, the Grafana dashboard **The Handover — players** shows it
@@ -242,10 +256,10 @@ and the published breakdown agree.
 
 When the game closes:
 
-1. `python3 scripts/results.py ~/handover-leaderboard.db > results.md` (on the
+1. `sudo python3 scripts/results.py /var/lib/handover/handover-leaderboard.db > results.md` (on the
    host, or on a restored backup). It prints totals and averages only, with no
    player ids or command lines, so it can be published as is.
-2. Delete the raw records: `sqlite3 ~/handover-leaderboard.db 'DELETE FROM events; DELETE FROM player_ids; VACUUM;'`,
+2. Delete the raw records: `sudo -u handover sqlite3 /var/lib/handover/handover-leaderboard.db 'DELETE FROM events; DELETE FROM player_ids; VACUUM;'`,
    and delete the backup artifacts in GitHub Actions (they expire after 30 days anyway).
 
 ## Known gotchas / non-bugs (seen this session)
@@ -297,7 +311,11 @@ When the game closes:
 
 ## Hardening posture (break-tested)
 
-Strong: unprivileged containers, no network device (no egress, no cloud
+Strong: the spawner and every ttyd (the processes that read player traffic)
+run as `handover`, not an Incus admin: Incus trusts its certificate for the
+restricted `handover` project only, so a bug in them reaches player boxes,
+not the host (break-tested on Incus 6.0.0, 2026-10-23; see Spawner).
+Unprivileged containers, no network device (no egress, no cloud
 metadata), guest API off, fork-bomb/mem-bomb contained by cgroup limits, a 1400 MiB
 disk quota caps fill, 30 GiB pool is the host ceiling. Spawning gated by
 Cloudflare Turnstile + per-IP rate limit (5/10 min) + hard 60-seat cap.
@@ -323,6 +341,15 @@ which it ignores.)
 - **Seat behaviour under real load** (squatting, cap at 20, 60-min reclaim).
 
 ## Change log
+
+- **2026-10-23:** the spawner runs as `handover` with a certificate restricted
+  to the new `handover` Incus project, sandboxed by systemd, instead of as
+  `ubuntu` (in `incus-admin`, root-equivalent). Code moved to `/opt/handover`,
+  state and leaderboard to `/var/lib/handover`, secrets to
+  `/etc/handover/spawner.env`. The first deploy moves the leaderboard and
+  deletes the boxes in the default project (players resume from their saves);
+  it leaves `/home/ubuntu/handover-leaderboard.db.migrated`: **delete it once
+  the new leaderboard is checked** (it holds raw player records).
 
 - **2026-10-20:** standby boxes (`WARM_SPARES=3`): players get a started box
   at once; see System at a glance.
