@@ -3,16 +3,16 @@ site (barrypekerman.com) sends, with a CSP fitted to each kind of page:
 
 - the spawner's own pages: scripts only with this response's nonce (every
   page has inline scripts the server fills in) or from Turnstile; never framed.
+  The templates mark their own scripts nonce="__NONCE__", and each handler
+  puts the nonce in (nonced) before inserting anything else, so a <script>
+  that got into a page through data (a player's name) never carries it.
 - /t/<sid>/...: ttyd's page, proxied as is. Its bundle is one inline script
   and style, so those are allowed there; only /app/<sid> (same origin) frames it.
 
-The nonce goes onto the page's <script> tags in a middleware, before the body
-is final; the headers go on in on_response_prepare, which also runs for
-streamed and WebSocket responses.
+The headers go on in on_response_prepare, which also runs for streamed and
+WebSocket responses.
 """
 import secrets
-
-from aiohttp import web
 
 TURNSTILE = "https://challenges.cloudflare.com"
 
@@ -58,16 +58,12 @@ def is_terminal(request) -> bool:
     return request.path.startswith("/t/")
 
 
-@web.middleware
-async def nonce_scripts(request, handler):
-    """Give the spawner's own HTML pages a fresh nonce on their <script> tags."""
-    resp = await handler(request)
-    if (not is_terminal(request) and isinstance(resp, web.Response)
-            and resp.content_type == "text/html" and resp.text and "<script" in resp.text):
-        nonce = secrets.token_urlsafe(16)
-        request["csp_nonce"] = nonce
-        resp.text = resp.text.replace("<script", f'<script nonce="{nonce}"')
-    return resp
+def nonced(request, template: str) -> str:
+    """The template with this response's nonce in its own script tags. Call it
+    on the template, before any other substitution."""
+    nonce = request.get("csp_nonce") or secrets.token_urlsafe(16)
+    request["csp_nonce"] = nonce
+    return template.replace("__NONCE__", nonce)
 
 
 async def add_headers(request, response):

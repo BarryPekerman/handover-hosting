@@ -364,3 +364,10 @@ def test_the_terminal_may_be_framed_by_its_own_page_only():
         assert status == 403
         assert h["X-Frame-Options"] == "SAMEORIGIN" and csp(h)["frame-ancestors"] == "'self'"
         assert h["Strict-Transport-Security"] == "max-age=31536000"
+
+
+def test_a_script_that_got_in_through_a_players_name_never_gets_the_nonce():
+    finished("1", '@<script nonce="__NONCE__">x</script>', 100)
+    status, h, body, _ = call("GET", "/leaderboard")
+    nonce = csp(h)["script-src"].split("'nonce-")[1].split("'")[0]
+    assert status == 200 and nonce not in body
