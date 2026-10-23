@@ -338,6 +338,13 @@ which it ignores.)
 
 ## Parked / not done
 
+- **One VM, by choice.** Everything runs on one OCI Always Free A1 instance:
+  when it or its tunnel hiccups, the game is down (seen 2026-10-23: a 502 for
+  a few seconds). A second host would double the free quota this uses and
+  need shared state (sessions, leaderboard). The answer is to see outages, not
+  prevent them: a public probe of `/healthz` (oke-gitops, review item H5) and
+  `rebuild.yml` (rehearsed: about 10 minutes from nothing).
+
 - **SSH :22 IP allow-list** (OCI security list): deliberately skipped — operator
   IP rotates. Revisit only if SSH abuse becomes real (fail2ban covers noise).
 - Low-severity residuals: none open that block anything.

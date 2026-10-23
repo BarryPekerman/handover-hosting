@@ -156,13 +156,20 @@
         state: started
 
     # Pulled in as a dependency; nothing uses RPC and it's a reflection vector.
+    # Masked even where it isn't installed (a plain Ubuntu image), so a later
+    # install can't start it. The systemd module fails on a missing unit,
+    # hence systemctl (noqa below).
+    - name: Look for rpcbind
+      ansible.builtin.command: systemctl is-enabled rpcbind.service rpcbind.socket  # noqa: command-instead-of-module
+      register: rpcbind
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
     - name: Rpcbind off
-      ansible.builtin.systemd:
-        name: "{{ item }}"
-        state: stopped
-        enabled: false
-        masked: true
-      loop: [rpcbind.service, rpcbind.socket]
+      ansible.builtin.command: systemctl mask --now rpcbind.service rpcbind.socket  # noqa: command-instead-of-module
+      when: rpcbind.stdout_lines != ["masked", "masked"]
+      changed_when: true
 
     # The ttyd package enables its own service: a host `login` prompt on
     # 127.0.0.1:7681. Nothing uses it (the spawner runs one ttyd per box).
