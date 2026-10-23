@@ -41,3 +41,46 @@ resource "github_actions_secret" "images_namespace" {
 output "images_bucket" {
   value = "${oci_objectstorage_bucket.images.namespace}/${oci_objectstorage_bucket.images.name}"
 }
+
+# The nightly leaderboard backups (backup.yml), encrypted before upload, and the
+# monthly restore test (restore-test.yml) that proves they decrypt and open.
+# Written by handover-backup, which may add and read objects but not delete
+# them (../infra-iam). Each backup is kept 30 days, the time the story page
+# promises raw records outlive the game; closing the game empties the bucket
+# (docs/ops-notes.md). A few KB a night, well inside Always Free's 20 GB.
+resource "oci_objectstorage_bucket" "backups" {
+  #checkov:skip=CKV_OCI_7:Oracle-managed encryption; the objects are already gpg-encrypted before upload
+  #checkov:skip=CKV_OCI_8:versioning would keep deleted backups past the 30 days promised
+  #checkov:skip=CKV_OCI_10:nothing consumes object events
+  compartment_id = var.compartment_ocid
+  namespace      = data.oci_objectstorage_namespace.this.namespace
+  name           = "handover-backups"
+  access_type    = "NoPublicAccess"
+  storage_tier   = "Standard"
+  versioning     = "Disabled"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "oci_objectstorage_object_lifecycle_policy" "backups" {
+  namespace = data.oci_objectstorage_namespace.this.namespace
+  bucket    = oci_objectstorage_bucket.backups.name
+
+  rules {
+    name        = "delete-after-30-days"
+    action      = "DELETE"
+    is_enabled  = true
+    target      = "objects"
+    time_amount = 30
+    time_unit   = "DAYS"
+  }
+}
+
+# backup.yml and restore-test.yml address the bucket by namespace
+resource "github_actions_secret" "backups_namespace" {
+  repository  = "handover-hosting"
+  secret_name = "OCI_BACKUP_NAMESPACE"
+  value       = data.oci_objectstorage_namespace.this.namespace
+}

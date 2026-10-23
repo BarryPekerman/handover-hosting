@@ -1,0 +1,64 @@
+name: restore-test
+
+# Proves the backups can be restored: takes the newest object in the
+# handover-backups bucket, decrypts it with BACKUP_PASSPHRASE, and opens the
+# leaderboard DB in it. Red if the newest backup is older than 36 h, doesn't
+# decrypt, isn't a whole SQLite DB, or is missing a table. Prints only counts.
+# The decrypted copy never leaves the runner and is deleted at the end.
+on:
+  schedule:
+    - cron: "41 3 2 * *"     # monthly, the night after the 1st's credential check
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install the OCI CLI (pinned)
+        run: python3 -m pip install --user "oci-cli==3.77.0"
+
+      - name: Download, decrypt and open the newest backup
+        env:
+          OCI_NS: ${{ secrets.OCI_BACKUP_NAMESPACE }}
+          OCI_CLI_USER: ${{ secrets.OCI_BACKUP_USER }}
+          OCI_CLI_TENANCY: ${{ secrets.OCI_BACKUP_TENANCY }}
+          OCI_CLI_FINGERPRINT: ${{ secrets.OCI_BACKUP_FINGERPRINT }}
+          OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_BACKUP_KEY_CONTENT }}
+          OCI_CLI_REGION: il-jerusalem-1
+          PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          umask 077
+          oci="$HOME/.local/bin/oci"
+          d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+          newest=$("$oci" os object list -bn handover-backups -ns "$OCI_NS" --prefix handover-backup- --all \
+                     --fields name,timeCreated |
+                   jq -r '[.data[]?] | sort_by(."time-created") | last | "\(.name) \(."time-created")"')
+          read -r name created <<<"$newest"
+          [ "$name" != null ] || { echo "::error::the backup bucket is empty"; exit 1; }
+          age_h=$(( ($(date +%s) - $(date -d "$created" +%s)) / 3600 ))
+          echo "newest: $name, ${age_h} h old"
+          [ "$age_h" -le 36 ] || { echo "::error::the newest backup is ${age_h} h old (backup.yml runs nightly)"; exit 1; }
+
+          "$oci" os object get -bn handover-backups -ns "$OCI_NS" --name "$name" --file "$d/b.tgz.gpg" > /dev/null
+          printf '%s' "$PASSPHRASE" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
+            -d "$d/b.tgz.gpg" 2>/dev/null | tar xzf - -C "$d"
+          db="$d/handover-leaderboard.db"
+          [ -f "$db" ] || { echo "::error::no handover-leaderboard.db in $name"; exit 1; }
+
+          python3 - "$db" <<'EOF'
+          import sqlite3, sys
+          c = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+          ok = c.execute("PRAGMA integrity_check").fetchone()[0]
+          tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+          missing = {"players", "events", "player_ids"} - tables
+          counts = {t: c.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in sorted(tables - missing)}
+          print(f"integrity: {ok}; rows: {counts}")
+          if ok != "ok" or missing:
+              print(f"::error::restore check failed (integrity {ok}, missing tables {sorted(missing)})")
+              sys.exit(1)
+          EOF
+          echo "restore OK: $name" >> "$GITHUB_STEP_SUMMARY"
