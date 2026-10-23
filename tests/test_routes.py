@@ -7,13 +7,15 @@ HTTP requests to the spawner's app. Everything that would touch Incus
 import asyncio
 import os
 import sqlite3
+import subprocess
 import sys
 from contextlib import closing
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "spawner"))
+SPAWNER_DIR = os.path.join(os.path.dirname(__file__), "..", "spawner")
+sys.path.insert(0, SPAWNER_DIR)
 import auth  # noqa: E402
 import common  # noqa: E402
 import metrics  # noqa: E402
@@ -67,13 +69,13 @@ def ghid(uid):
     return auth._sign({"uid": uid, "login": "u" + str(uid)})
 
 
-def call(method, path, cookies=None, data=None, ip="1.1.1.1"):
+def call(method, path, cookies=None, data=None, ip="1.1.1.1", headers=None):
     """One request to the spawner's app: (status, headers, body, cookies set)."""
     async def go():
         app = sp.make_app()
         app.on_startup.clear(); app.on_shutdown.clear(); app.on_cleanup.clear()   # no Incus
         async with TestClient(TestServer(app)) as c:
-            h = {"CF-Connecting-IP": ip}
+            h = {"CF-Connecting-IP": ip, **(headers or {})}
             if cookies:
                 h["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
             r = await c.request(method, path, headers=h, data=data, allow_redirects=False)
@@ -273,6 +275,21 @@ def test_another_account_cannot_open_the_terminal_even_with_the_cookie():
     live("s1", uid="42")
     status, h, _, _ = call("GET", "/app/s1", cookies={common.COOKIE: "s1", "ghid": ghid("99")})
     assert (status, h["Location"]) == (302, "/")
+
+
+def test_a_terminal_socket_opened_from_another_sites_page_is_refused():
+    live("s1", port=1)          # no ttyd: a refused socket never gets that far
+    ws = {"Upgrade": "websocket", "Connection": "Upgrade", "Sec-WebSocket-Version": "13",
+          "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Origin": "https://evil.barrypekerman.com"}
+    status, _, body, _ = call("GET", "/t/s1/ws", cookies={common.COOKIE: "s1"}, headers=ws)
+    assert (status, body) == (403, "cross-site terminal")
+
+
+def test_the_spawner_will_not_run_without_the_bot_check():
+    env = {k: v for k, v in os.environ.items() if k not in ("TURNSTILE_SECRET", "ALLOW_NO_TURNSTILE")}
+    r = subprocess.run([sys.executable, os.path.join(SPAWNER_DIR, "spawner.py")], env=env,
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode != 0 and "TURNSTILE_SECRET is not set" in r.stderr
 
 
 def test_an_outdated_terminal_goes_to_the_landing_page():

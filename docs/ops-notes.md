@@ -327,7 +327,11 @@ project on purpose; box root still has keyrings.
 Unprivileged containers, no network device (no egress, no cloud
 metadata), guest API off, fork-bomb/mem-bomb contained by cgroup limits, a 1400 MiB
 disk quota caps fill, 30 GiB pool is the host ceiling. Spawning gated by
-Cloudflare Turnstile + per-IP rate limit (5/10 min) + hard 60-seat cap.
+Cloudflare Turnstile (the spawner refuses to start without its secret) +
+per-IP rate limit (5/10 min; IPv6 counted per /64) + hard 60-seat cap. The
+terminal WebSocket only opens from the game's own page (Origin check: every
+`*.barrypekerman.com` is the same site for the SameSite=Lax cookies); the id
+cookies are `Secure`.
 No inbound ports at all: SSH only through the tunnel behind Cloudflare Access,
 key-only. (fail2ban still runs but sees only tunnel traffic from localhost,
 which it ignores.)

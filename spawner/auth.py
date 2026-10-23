@@ -4,11 +4,13 @@ the per-IP throttle and the Turnstile bot check.
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import secrets
 import time
 from contextlib import closing
+from urllib.parse import urlsplit
 
 from aiohttp import ClientSession, ClientTimeout
 
@@ -114,20 +116,53 @@ def player_id(request, uid) -> str:
     return pid if PID_RE.fullmatch(pid) else secrets.token_hex(16)
 
 
+# Over https (the live site) the id cookies never travel in clear text; a
+# local http:// run keeps them usable.
+SECURE_COOKIES = PUBLIC_URL.startswith("https://")
+
+
 def with_pid(resp, pid: str):
-    resp.set_cookie("pid", pid, httponly=True, samesite="Lax", path="/", max_age=365 * 86400)
+    resp.set_cookie("pid", pid, httponly=True, samesite="Lax", secure=SECURE_COOKIES,
+                    path="/", max_age=365 * 86400)
     return resp
 
 
 def with_cookie(resp, sid: str):
-    resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", path="/", max_age=MAX_LIFE)
+    resp.set_cookie(COOKIE, sid, httponly=True, samesite="Lax", secure=SECURE_COOKIES,
+                    path="/", max_age=MAX_LIFE)
     return resp
 
 
+def same_origin(request) -> bool:
+    """True unless a browser opened this from another site's page. The cookies
+    are SameSite=Lax and every *.barrypekerman.com is the same site, so without
+    this a page on any subdomain could open a player's terminal WebSocket with
+    their cookie. No Origin header means no browser (curl, the tests): those
+    still need the cookie. The public URL is accepted as well as the request's
+    own host, so a proxy that rewrites Host can't lock players out."""
+    origin = request.headers.get("Origin")
+    return origin is None or urlsplit(origin).netloc in (request.host, urlsplit(PUBLIC_URL).netloc)
+
+
+def rate_key(ip: str) -> str:
+    """What the throttle counts: an IPv4 address, or an IPv6 address's /64
+    (one subscriber gets a whole /64, so per-address would be no limit)."""
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if a.version == 6 and a.ipv4_mapped is None:
+        return str(ipaddress.ip_network(f"{a}/64", strict=False))
+    return str(getattr(a, "ipv4_mapped", None) or a)
+
+
 def throttled(ip: str) -> bool:
-    """True if this IP has started too many containers lately (records a hit if not)."""
+    """True if this IP (IPv6: its /64) has started too many containers lately
+    (records a hit if not). Sources with no start in the window are forgotten."""
     now = time.time()
-    q = ip_hits.setdefault(ip, [])
+    for k in [k for k, q in ip_hits.items() if not q or now - q[-1] >= RATE_WINDOW]:
+        del ip_hits[k]
+    q = ip_hits.setdefault(rate_key(ip), [])
     q[:] = [t for t in q if now - t < RATE_WINDOW]
     if len(q) >= RATE_MAX:
         return True

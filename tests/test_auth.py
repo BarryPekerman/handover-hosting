@@ -88,6 +88,21 @@ def test_identity_is_anonymous_without_a_signing_key(monkeypatch):
 def test_id_cookies_are_hidden_from_page_scripts_and_other_sites(name, set_cookie):
     c = set_cookie(web.Response()).cookies[name]
     assert c["httponly"] and c["samesite"] == "Lax"
+    assert c["secure"]                                   # the live site is https: never in clear text
+
+
+@pytest.mark.parametrize("origin,host,ok", [
+    (None, "play.barrypekerman.com", True),                                   # not a browser
+    ("https://play.barrypekerman.com", "play.barrypekerman.com", True),       # the game's own page
+    ("http://127.0.0.1:8099", "127.0.0.1:8099", True),                        # a local run
+    ("https://play.barrypekerman.com", "localhost:8080", True),               # a proxy rewrote Host
+    ("https://evil.barrypekerman.com", "play.barrypekerman.com", False),      # same site, other page
+    ("https://example.com", "play.barrypekerman.com", False),
+    ("null", "play.barrypekerman.com", False),                                # sandboxed iframe
+])
+def test_only_the_games_own_page_may_open_a_terminal_socket(origin, host, ok):
+    h = {"Host": host, **({"Origin": origin} if origin else {})}
+    assert auth.same_origin(make_mocked_request("GET", "/t/s1/ws", headers=h)) is ok
 
 
 # ---- throttle ------------------------------------------------------------
@@ -101,6 +116,25 @@ def test_throttle_allows_rate_max_then_blocks_until_the_window_passes(monkeypatc
     assert not auth.throttled("8.8.8.8")                 # per IP
     now[0] += common.RATE_WINDOW
     assert not auth.throttled("9.9.9.9")
+
+
+def test_ipv6_is_throttled_per_64_so_one_subscriber_cannot_rotate_addresses(monkeypatch):
+    monkeypatch.setattr(auth.time, "time", lambda: 1000.0)
+    for i in range(common.RATE_MAX):
+        assert not auth.throttled(f"2001:db8:1:2::{i + 1:x}")
+    assert auth.throttled("2001:db8:1:2:ffff::9")        # same /64, new address
+    assert not auth.throttled("2001:db8:1:3::1")         # the next /64 is someone else
+    assert auth.rate_key("::ffff:9.9.9.9") == "9.9.9.9"  # IPv4-mapped counts as the IPv4
+    assert auth.rate_key("garbage") == "garbage"
+
+
+def test_throttle_forgets_sources_with_no_recent_starts(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(auth.time, "time", lambda: now[0])
+    auth.throttled("9.9.9.9")
+    now[0] += common.RATE_WINDOW
+    auth.throttled("8.8.8.8")
+    assert list(common.ip_hits) == ["8.8.8.8"]
 
 
 # ---- fake aiohttp client -------------------------------------------------
