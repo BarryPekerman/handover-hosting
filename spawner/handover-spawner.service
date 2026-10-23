@@ -20,7 +20,7 @@ RestartSec=2
 TimeoutStopSec=15
 
 # Sandbox. Writable: its home (state, leaderboard, Incus client config) and
-# /run/lock, for the launch lock it shares with bandit-wannabe's image switch.
+# /run/lock, for the launch lock it shares with the-handover-linux-ctf's image switch.
 UMask=0077
 NoNewPrivileges=yes
 ProtectSystem=strict

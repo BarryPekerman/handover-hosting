@@ -3,7 +3,7 @@ name: rebuild
 # The whole host, from code, in one approval:
 #   gh workflow run rebuild.yml -R BarryPekerman/handover-hosting
 # infra (terraform apply) -> reach (tunnel up, ssh works) -> host (deploy.yml:
-# playbook + spawner) -> image (bandit-wannabe's deploy-image: the newest
+# playbook + spawner) -> image (the-handover-linux-ctf's deploy-image: the newest
 # tested image in the handover-images bucket) -> verify. Safe on a healthy host too: each step is
 # idempotent (a no-op plan, an image that's already live).
 #
@@ -92,14 +92,14 @@ jobs:
     needs: host
     runs-on: ubuntu-24.04
     env:
-      GH_TOKEN: ${{ secrets.REBUILD_GH_TOKEN }}   # Actions read/write on bandit-wannabe only
-      REPO: BarryPekerman/bandit-wannabe
+      GH_TOKEN: ${{ secrets.REBUILD_GH_TOKEN }}   # Actions read/write on the-handover-linux-ctf only
+      REPO: BarryPekerman/the-handover-linux-ctf
     steps:
-      # deploy-image with no run_id ships the newest image bandit-wannabe's ci
+      # deploy-image with no run_id ships the newest image the-handover-linux-ctf's ci
       # stored in the handover-images bucket (infra/storage.tf). If the bucket
       # has none (its "Pick" step failed), build one now, tests included, and
       # ship that; any other failure fails the rebuild.
-      - name: Ship bandit-wannabe's latest tested image
+      - name: Ship the-handover-linux-ctf's latest tested image
         run: |
           start_and_wait() {   # <workflow> [-f k=v...]: dispatch on main, wait, print the run id (also on failure)
             local wf=$1; shift

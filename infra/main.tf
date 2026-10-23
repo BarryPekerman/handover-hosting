@@ -101,7 +101,7 @@ resource "oci_core_instance" "handover" {
     # before the playbook (which also manages these keys) has ever run.
     ssh_authorized_keys = join("\n", [
       var.ssh_public_key,
-      trimspace(file("${path.module}/../host/deploy-keys/bandit-wannabe.pub")),
+      trimspace(file("${path.module}/../host/deploy-keys/the-handover-linux-ctf.pub")),
       trimspace(file("${path.module}/../host/deploy-keys/handover-hosting.pub")),
     ])
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {

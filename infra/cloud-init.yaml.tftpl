@@ -12,7 +12,7 @@
 # After `terraform apply` creates a box:
 #   1. gh workflow run deploy.yml -R BarryPekerman/handover-hosting
 #      (host config + spawner; Incus has to exist before an image can land)
-#   2. gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<latest passing ci on main>
+#   2. gh workflow run deploy-image.yml -R BarryPekerman/the-handover-linux-ctf -f run_id=<latest passing ci on main>
 package_update: true
 package_upgrade: true
 

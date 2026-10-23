@@ -77,7 +77,7 @@ Each rewrite was checked by planting the bug it should catch (now in
 
 ## End to end (`vm/`)
 
-**`vm/run.sh`** runs against bandit-wannabe's Vagrant VM: the real spawner,
+**`vm/run.sh`** runs against the-handover-linux-ctf's Vagrant VM: the real spawner,
 ttyd and tmux, with `vm/bin/incus` standing in for Incus and forwarding every
 "container" into the VM. Nine scenarios: fresh play + save, resume with a good
 and a forged password, one box across two signed-in devices, a shared tmux
@@ -104,7 +104,7 @@ memory runs low, and deletes every load box on exit.
     scp scripts/capacity.sh handover: && ssh handover 'bash capacity.sh 60 </dev/null'
 
 **`scripts/footprint.sh`** plays the whole game in one box (each level's
-intended solution from bandit-wannabe's `solve.sh`, run as that level's user)
+intended solution from the-handover-linux-ctf's `solve.sh`, run as that level's user)
 and reports its memory peak, what the memory is, whether anything was killed,
 and the disk it wrote. `MEM=256MiB` tries a tighter limit on that box only.
 Usage is at the top of the script.

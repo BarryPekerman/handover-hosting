@@ -1,4 +1,4 @@
-# The game images: bandit-wannabe's CI uploads each tested release build here
+# The game images: the-handover-linux-ctf's CI uploads each tested release build here
 # (~270 MB, named handover-<ci run id>-<commit>.tar.zst) and keeps the newest 6;
 # its deploy-image workflow ships one to the host from here. They live in this
 # tenancy because only this host uses them, and a bucket outlives a rebuilt VM.
@@ -30,10 +30,10 @@ resource "oci_objectstorage_bucket" "images" {
   }
 }
 
-# bandit-wannabe's workflows address the bucket by namespace; the API key
+# the-handover-linux-ctf's workflows address the bucket by namespace; the API key
 # itself is a hand-set secret (README.md).
 resource "github_actions_secret" "images_namespace" {
-  repository  = "bandit-wannabe"
+  repository  = "the-handover-linux-ctf"
   secret_name = "OCI_IMAGES_NAMESPACE"
   value       = data.oci_objectstorage_namespace.this.namespace
 }

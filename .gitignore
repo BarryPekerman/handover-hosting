@@ -36,7 +36,7 @@
 !docs/hardening-plan.md
 !docs/ops-notes.md
 !docs/pipeline-plan.md
-!host/deploy-keys/bandit-wannabe.pub
+!host/deploy-keys/the-handover-linux-ctf.pub
 !host/deploy-keys/handover-hosting.pub
 !host/site.yml
 !infra-iam/README.md

@@ -9,7 +9,7 @@ is built or hand-edited on the host.
 | Layer | What it is | How it changes today |
 |---|---|---|
 | Infra | OCI A1 instance (Terraform, `infra/`) | By hand. Local state on the laptop (serial 1, instance imported). |
-| Host config | Incus, `games` pool, `isolated` profile, fail2ban, sysctls, cloudflared, ttyd, rpcbind masked | By hand. `cloud-init.yaml` mirrors it but only runs at first boot, and it clones `bandit-wannabe` anonymously, which fails now that the repo is private. |
+| Host config | Incus, `games` pool, `isolated` profile, fail2ban, sysctls, cloudflared, ttyd, rpcbind masked | By hand. `cloud-init.yaml` mirrors it but only runs at first boot, and it clones `the-handover-linux-ctf` anonymously, which fails now that the repo is private. |
 | Spawner | `spawner/`, unit, tunnel config | **CD**: push to `main` → `deploy.yml`. |
 | Game image | `handover` Incus image, 269 MiB, arm64 | CI builds + tests an *x86* copy and throws it away; the live arm64 image is built by hand on the host. `incus-image.sh build` publishes to the live alias **before** solve/leak tests run. |
 
@@ -17,7 +17,7 @@ Passwords are generated at build time into `credentials/` (21 `*_pass` + 5
 decoy files), which exists only on the host. Resume depends on them staying the
 same across builds.
 
-## Phase 1 — game image pipeline (bandit-wannabe) ✅ done 2026-10-18 (except step 5)
+## Phase 1 — game image pipeline (the-handover-linux-ctf) ✅ done 2026-10-18 (except step 5)
 
 1. **Passwords into a GitHub secret.** Copy the host's existing `credentials/`
    (tar + base64) into the repo secret `HANDOVER_CREDENTIALS`, so live players'
@@ -41,9 +41,9 @@ same across builds.
      images.
    - Running players keep their containers; new players get the new image.
    - The full log lives in the Actions run.
-5. **Host cleanup.** Remove `~/bandit-wannabe` and its `credentials/` from the
+5. **Host cleanup.** Remove `~/the-handover-linux-ctf` and its `credentials/` from the
    host once the first pipeline deploy has succeeded.
-6. Add the `DEPLOY_HOST` / `DEPLOY_SSH_KEY` secrets to bandit-wannabe (same
+6. Add the `DEPLOY_HOST` / `DEPLOY_SSH_KEY` secrets to the-handover-linux-ctf (same
    values as handover-hosting).
 
 ## Phase 2 — Terraform on Terraform Cloud (handover-hosting `infra/`) ✅ done 2026-10-18
