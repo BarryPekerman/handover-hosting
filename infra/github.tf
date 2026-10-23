@@ -5,7 +5,7 @@
 # these secrets, so renew it before then and update the workspace variable).
 
 locals {
-  ci_repos = toset(["handover-hosting", "bandit-wannabe"])
+  ci_repos = toset(["handover-hosting", "the-handover-linux-ctf"])
 }
 
 # The service token CI uses to get past Cloudflare Access on handover-ssh.
@@ -48,4 +48,23 @@ resource "github_actions_secret" "cf_tunnel_token" {
   repository  = "handover-hosting"
   secret_name = "CF_TUNNEL_TOKEN"
   value       = data.cloudflare_zero_trust_tunnel_cloudflared_token.handover.token
+}
+
+# The game repo was renamed (bandit-wannabe -> the-handover-linux-ctf). Moving
+# the state keeps each secret one resource: replaced (deleted, then created)
+# instead of an unrelated delete and create, which in either order could
+# delete the new secret through GitHub's redirect from the old name.
+moved {
+  from = github_actions_secret.cf_access_client_id["bandit-wannabe"]
+  to   = github_actions_secret.cf_access_client_id["the-handover-linux-ctf"]
+}
+
+moved {
+  from = github_actions_secret.cf_access_client_secret["bandit-wannabe"]
+  to   = github_actions_secret.cf_access_client_secret["the-handover-linux-ctf"]
+}
+
+moved {
+  from = github_actions_secret.deploy_known_hosts["bandit-wannabe"]
+  to   = github_actions_secret.deploy_known_hosts["the-handover-linux-ctf"]
 }

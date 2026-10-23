@@ -67,7 +67,7 @@ run: `ansible-playbook -i <host>, -u ubuntu --private-key <key> host/site.yml --
   incus profile set isolated limits.cpu.allowance=50% limits.memory=320MiB limits.processes=300
   incus profile set isolated security.guestapi=false security.idmap.isolated=true
   ```
-- The game image as alias `handover`. It is **not built here**: `bandit-wannabe`'s
+- The game image as alias `handover`. It is **not built here**: `the-handover-linux-ctf`'s
   CI builds and tests it, and its `deploy-image` workflow imports it and moves
   the alias (the previous image stays as `handover-prev`).
 

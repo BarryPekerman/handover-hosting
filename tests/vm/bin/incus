@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stand-in for `incus` while testing the spawner against bandit-wannabe's
+# Stand-in for `incus` while testing the spawner against the-handover-linux-ctf's
 # Vagrant VM: every "container" is that VM. launch/delete are no-ops; the live
 # image is the fingerprint in $STATE/fp (change it to simulate an image deploy).
 STATE=${HANDOVER_VM_STATE:?}

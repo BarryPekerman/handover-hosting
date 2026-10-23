@@ -1,12 +1,12 @@
 #!/bin/bash
-# End-to-end spawner check against bandit-wannabe's Vagrant VM (make local-up
+# End-to-end spawner check against the-handover-linux-ctf's Vagrant VM (make local-up
 # there first): real spawner + ttyd + tmux, with a fake `incus` that forwards
 # into the VM. Runs the nine scenarios in scenarios.sh, then cleans up.
 # Exits non-zero if any check failed (or there is no VM).
-#   PYTHON=<python with aiohttp>  BANDIT=<path to bandit-wannabe>  tests/vm/run.sh
+#   PYTHON=<python with aiohttp>  BANDIT=<path to the-handover-linux-ctf>  tests/vm/run.sh
 set -euo pipefail
 HERE=$(dirname "$(readlink -f "$0")")
-BANDIT=${BANDIT:-$HERE/../../../bandit-wannabe}
+BANDIT=${BANDIT:-$HERE/../../../the-handover-linux-ctf}
 export PYTHON=${PYTHON:-python3}
 HANDOVER_VM_STATE=$(mktemp -d)
 export HANDOVER_VM_STATE

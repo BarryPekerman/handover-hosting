@@ -61,11 +61,11 @@ top. Not player-facing.
   30 s), and are deleted and rebuilt on a spawner restart. `handover_spares`
   in /metrics. To turn them off: `WARM_SPARES=0` in the unit, redeploy.
 - **Code:** hosting (spawner, cloudflared, infra/terraform, this doc) lives in
-  **`handover-hosting`**; the game itself lives in **`bandit-wannabe`**, whose CI
+  **`handover-hosting`**; the game itself lives in **`the-handover-linux-ctf`**, whose CI
   builds the arm64 `handover` image and whose `deploy-image` workflow ships it.
   Nothing is built on the host.
 - **Deploys:** all manual `gh workflow run` (that's the approval): `deploy.yml`
-  here (spawner), `deploy-image.yml` in bandit-wannabe (image),
+  here (spawner), `deploy-image.yml` in the-handover-linux-ctf (image),
   `terraform.yml` here (infra, via Terraform Cloud `berries-handover`).
 - **CI access:** each repo's deploy workflow has its own SSH key
   (`DEPLOY_SSH_KEY`; public halves in `host/deploy-keys/`, installed by
@@ -115,7 +115,7 @@ journalctl -u handover-spawner -f                     # follow
 # safe restart (graceful; WS close + 5s timeout, re-adopts live containers)
 sudo systemctl restart handover-spawner
 
-# game image: shipped by bandit-wannabe's deploy-image workflow (not built here)
+# game image: shipped by the-handover-linux-ctf's deploy-image workflow (not built here)
 incus image list -c lfsu                              # handover = live, handover-prev = rollback
 # rollback to the previous image:
 incus query -X PATCH /1.0/images/aliases/handover \
@@ -136,9 +136,9 @@ the spawner. It refuses a commit that isn't on `main` with a passing `ci` run
 on the host within 30 s, stops, logs an `ERROR`/`Traceback` since the restart,
 or doesn't answer through the tunnel. A red deploy has still restarted the
 spawner: look at the step's output, fix, deploy again. Don't scp by
-hand. The game image ships the same way from bandit-wannabe: a `ci` run on
+hand. The game image ships the same way from the-handover-linux-ctf: a `ci` run on
 `main` builds and tests it, then
-`gh workflow run deploy-image.yml -R BarryPekerman/bandit-wannabe -f run_id=<id>`
+`gh workflow run deploy-image.yml -R BarryPekerman/the-handover-linux-ctf -f run_id=<id>`
 imports it and moves the `handover` alias (previous kept as `handover-prev`).
 Host setup changes go in `host/site.yml` (Ansible), never by hand: `deploy.yml`
 applies it on every deploy. Dry run from a laptop:
@@ -250,7 +250,7 @@ before any of these (dates in the workflow, conservative: made + 1 year):
 
 | Expires | Credential | Breaks | Rotate |
 |---|---|---|---|
-| 2027-10-09 | GitHub fine-grained PAT, HCP workspace variable `GITHUB_TOKEN` | every Terraform plan | New PAT (Secrets read/write on handover-hosting and bandit-wannabe), paste it into the workspace variable |
+| 2027-10-09 | GitHub fine-grained PAT, HCP workspace variable `GITHUB_TOKEN` | every Terraform plan | New PAT (Secrets read/write on handover-hosting and the-handover-linux-ctf), paste it into the workspace variable |
 | 2027-10-18 | Access service token `handover-ci-tf` | deploy, backup, rebuild (CI can't SSH through Access) | A Terraform run replacing `cloudflare_zero_trust_access_service_token.ci` (HCP: Start new run, Replace). `infra/github.tf` writes the new id and secret into both repos' Actions secrets |
 | 2027-10-19 | Access service token `oke-prometheus` | scraping and Grafana's player view; both Handover "down" alerts fire while the host is fine | A Terraform run replacing `cloudflare_zero_trust_access_service_token.prometheus`; read outputs `prometheus_access_client_id`/`_secret`, put them in oke-gitops `monitoring/manifests/prometheus-cf-access.enc.yaml` (SOPS, encrypt on the laptop), merge, then restart Grafana (it reads them as env at start) |
 
@@ -417,7 +417,7 @@ which it ignores.)
   `oke-gitops` from the new Terraform outputs.
 
 - **2026-10-18** (deployed through the new pipelines unless marked):
-  - Pipelines: image built/tested in bandit-wannabe CI and shipped by
+  - Pipelines: image built/tested in the-handover-linux-ctf CI and shipped by
     `deploy-image`; spawner deploy manual-only; Terraform on TFC with a scoped
     OCI user `tf-handover`; instance moved into compartment `handover`, state
     migrated, remote plan is a no-op.
@@ -443,11 +443,11 @@ which it ignores.)
     player could fake a reach with `logger -t su "session opened for user
     level20"` and climb the leaderboard. Rows written before this fix may be
     forged.
-  - `bandit-wannabe` `0f3f868`: plain `mail` shows Dave's note directly
+  - `the-handover-linux-ctf` `0f3f868`: plain `mail` shows Dave's note directly
     (playtester got lost in the mailx prompt).
 
 - **2026-10-17** (this session):
-  - `bandit-wannabe` `9156bad`: removed the dead AWS/EC2/Terraform deploy path;
+  - `the-handover-linux-ctf` `9156bad`: removed the dead AWS/EC2/Terraform deploy path;
     docs now lead with the live OCI+Incus hosting (sign-in, leaderboard).
   - `handover-hosting` `496152b`: btrfs `games` pool + 2 GiB per-container disk
     quota; `security.guestapi=false` (no host-name leak).

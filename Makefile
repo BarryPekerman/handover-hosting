@@ -1,7 +1,7 @@
 .PHONY: help test mutate e2e
 
-# bandit-wannabe's checkout: its Vagrant VM is the game box the end-to-end test plays.
-BANDIT ?= ../bandit-wannabe
+# the-handover-linux-ctf's checkout: its Vagrant VM is the game box the end-to-end test plays.
+BANDIT ?= ../the-handover-linux-ctf
 VENV   := .venv
 PY     := $(VENV)/bin/python
 
