@@ -24,6 +24,7 @@
 # Unignore specific files
 !.github/actions/tunnel-ssh/action.yml
 !.github/workflows/backup.yml
+!.github/workflows/credential-expiry.yml
 !.github/workflows/ci.yml
 !.github/workflows/deploy.yml
 !.github/workflows/rebuild.yml
