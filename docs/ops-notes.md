@@ -226,7 +226,11 @@ writes a 10-minute warning into every open terminal and reboots anyway. Decision
 ## Backups
 
 `backup.yml` runs nightly (02:17 UTC): the leaderboard DB, encrypted with `BACKUP_PASSPHRASE` (a copy is in `~/handover-backup-passphrase.txt`
-on the admin laptop), kept 30 days as the `handover-backup` artifact. Restore:
+on the admin laptop), kept 30 days as the `handover-backup` artifact. The repo
+is public, so the artifacts are too: anyone can list them and any signed-in
+GitHub user can download them. Only the encryption protects the raw records
+(44 random characters; if it's ever replaced, generate it, e.g.
+`openssl rand -base64 32`, never type one). Restore:
 
 ```bash
 gh run download <run> -R BarryPekerman/handover-hosting -n handover-backup
@@ -262,7 +266,10 @@ When the game closes:
    host, or on a restored backup). It prints totals and averages only, with no
    player ids or command lines, so it can be published as is.
 2. Delete the raw records: `sudo -u handover sqlite3 /var/lib/handover/handover-leaderboard.db 'DELETE FROM events; DELETE FROM player_ids; VACUUM;'`,
-   and delete the backup artifacts in GitHub Actions (they expire after 30 days anyway).
+   and delete the backup artifacts too, or the raw records outlive the promise on
+   the story page by up to 30 days:
+   `gh api --paginate 'repos/BarryPekerman/handover-hosting/actions/artifacts?name=handover-backup' -q '.artifacts[].id' | xargs -I{} gh api -X DELETE repos/BarryPekerman/handover-hosting/actions/artifacts/{}`
+   (and stop the `backup` workflow first, so the next night doesn't make a new one).
 
 ## Known gotchas / non-bugs (seen this session)
 
