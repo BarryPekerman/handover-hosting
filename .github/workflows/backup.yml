@@ -3,7 +3,9 @@ name: backup
 # Nightly copy of what exists only on the host: the leaderboard DB. (The
 # tunnel lives in Terraform now; the host holds only its run token, which is a
 # secret.) Encrypted with BACKUP_PASSPHRASE before it leaves the runner, kept
-# as a private artifact for 30 days. Restore: docs/ops-notes.md.
+# as an artifact for 30 days. Not private: this repo is public, so anyone can
+# list the artifacts and any signed-in GitHub user can download them. The
+# encryption is the only protection. Restore: docs/ops-notes.md.
 on:
   schedule:
     - cron: "17 2 * * *"     # 02:17 UTC, a quiet hour
