@@ -4,7 +4,9 @@
 #                       rules and the game-image bucket. No IAM.
 #   handover-images-ci  the game repo's CI: objects in the handover-images
 #                       bucket, nothing else.
-# Both are API-key only (no console password, tokens or other credentials).
+#   handover-backup     handover-hosting's backup workflows: create and read
+#                       objects in the handover-backups bucket, never delete.
+# All three are API-key only (no console password, tokens or other credentials).
 #
 # Oracle stamps CreatedBy/CreatedOn defined tags on everything; they're
 # ignored so they never show up as drift.
@@ -65,7 +67,7 @@ resource "oci_identity_user_group_membership" "terraform" {
 resource "oci_identity_policy" "terraform" {
   compartment_id = var.tenancy_ocid
   name           = "handover-terraform"
-  description    = "Terraform for The Handover: instances, boot volumes and the game-image bucket in compartment handover only; may attach to the tenancy's subnet"
+  description    = "Terraform for The Handover: instances, boot volumes, the game-image and backup buckets in compartment handover only; may attach to the tenancy's subnet"
   statements = [
     "Allow group handover-terraform to manage instance-family in compartment handover",
     "Allow group handover-terraform to manage volume-family in compartment handover",
@@ -75,6 +77,9 @@ resource "oci_identity_policy" "terraform" {
     # The game-image bucket (infra/storage.tf); its namespace is a tenancy-wide read.
     "Allow group handover-terraform to manage buckets in compartment handover",
     "Allow group handover-terraform to read objectstorage-namespaces in tenancy",
+    # Setting the backup bucket's lifecycle rule (infra/storage.tf) takes
+    # object permissions on that bucket
+    "Allow group handover-terraform to manage objects in compartment handover where target.bucket.name = 'handover-backups'",
   ]
 
   lifecycle {
@@ -140,6 +145,82 @@ resource "oci_identity_policy" "images_ci" {
   }
 }
 
+# --- handover-backup: the nightly backup and its restore test ---
+resource "oci_identity_group" "backup" {
+  compartment_id = var.tenancy_ocid
+  name           = "handover-backup"
+  description    = "handover-hosting's backup.yml and restore-test.yml: write and read the handover-backups bucket, never delete"
+
+  lifecycle {
+    ignore_changes = [defined_tags]
+  }
+}
+
+resource "oci_identity_user" "backup" {
+  compartment_id = var.tenancy_ocid
+  name           = "handover-backup"
+  description    = "The leaderboard backups (backup.yml, restore-test.yml). API key only, no console login."
+  email          = var.backup_user_email
+
+  lifecycle {
+    ignore_changes = [defined_tags]
+  }
+}
+
+resource "oci_identity_user_capabilities_management" "backup" {
+  user_id                      = oci_identity_user.backup.id
+  can_use_api_keys             = true
+  can_use_auth_tokens          = false
+  can_use_console_password     = false
+  can_use_customer_secret_keys = false
+  can_use_smtp_credentials     = false
+}
+
+resource "oci_identity_user_group_membership" "backup" {
+  user_id  = oci_identity_user.backup.id
+  group_id = oci_identity_group.backup.id
+}
+
+# Only the public half is here; the private key goes from the admin's disk
+# straight into handover-hosting's OCI_BACKUP_KEY_CONTENT secret (README.md).
+resource "oci_identity_api_key" "backup" {
+  user_id   = oci_identity_user.backup.id
+  key_value = file("${path.module}/keys/handover-backup.pub.pem")
+}
+
+# Create, list and read objects, and nothing else: no delete, no overwrite.
+# Whoever holds the CI key can add backups but can't destroy the ones there.
+# Old backups go by the bucket's lifecycle rule (infra/storage.tf), which is
+# Object Storage acting with the service policy below.
+resource "oci_identity_policy" "backup" {
+  compartment_id = var.tenancy_ocid
+  name           = "handover-backup"
+  description    = "The leaderboard backups: create and read objects in the handover-backups bucket; never delete or overwrite"
+  statements = [
+    "Allow group handover-backup to read buckets in compartment handover where target.bucket.name = 'handover-backups'",
+    "Allow group handover-backup to manage objects in compartment handover where all {target.bucket.name = 'handover-backups', any {request.permission = 'OBJECT_CREATE', request.permission = 'OBJECT_INSPECT', request.permission = 'OBJECT_READ'}}",
+  ]
+
+  lifecycle {
+    ignore_changes = [defined_tags]
+  }
+}
+
+# Object lifecycle rules run as the Object Storage service, which needs its own
+# permission to delete expired objects. Scoped to the backup bucket.
+resource "oci_identity_policy" "objectstorage_lifecycle" {
+  compartment_id = var.tenancy_ocid
+  name           = "handover-objectstorage-lifecycle"
+  description    = "Object Storage may delete expired objects in the handover-backups bucket (its lifecycle rule)"
+  statements = [
+    "Allow service objectstorage-${var.region} to manage object-family in compartment handover where target.bucket.name = 'handover-backups'",
+  ]
+
+  lifecycle {
+    ignore_changes = [defined_tags]
+  }
+}
+
 # --- The rest of "API key only" ---
 # oci_identity_user_capabilities_management (oracle/oci 6.37) can't switch off
 # DB credentials and OAuth2 client credentials, and a new identity-domain user
@@ -157,6 +238,7 @@ resource "terraform_data" "api_key_only" {
   for_each = {
     (oci_identity_user.terraform.name) = oci_identity_user.terraform.id
     (oci_identity_user.images_ci.name) = oci_identity_user.images_ci.id
+    (oci_identity_user.backup.name)    = oci_identity_user.backup.id
   }
   triggers_replace = [each.value]
 
@@ -188,5 +270,14 @@ output "images_ci" {
     user        = oci_identity_user.images_ci.id
     tenancy     = var.tenancy_ocid
     fingerprint = oci_identity_api_key.images_ci.fingerprint
+  }
+}
+
+# The values handover-hosting's backup workflows need (OCI_BACKUP_* secrets; README.md).
+output "backup" {
+  value = {
+    user        = oci_identity_user.backup.id
+    tenancy     = var.tenancy_ocid
+    fingerprint = oci_identity_api_key.backup.fingerprint
   }
 }

@@ -24,6 +24,7 @@
 # Unignore specific files
 !.github/actions/tunnel-ssh/action.yml
 !.github/workflows/backup.yml
+!.github/workflows/restore-test.yml
 !.github/workflows/credential-expiry.yml
 !.github/workflows/ci.yml
 !.github/workflows/deploy.yml
@@ -45,6 +46,7 @@
 !infra-iam/variables.tf
 !infra-iam/terraform.tfvars.example
 !infra-iam/keys/handover-images-ci.pub.pem
+!infra-iam/keys/handover-backup.pub.pem
 !infra/README.md
 !infra/cloud-init.yaml.tftpl
 !infra/cloudflare.tf
