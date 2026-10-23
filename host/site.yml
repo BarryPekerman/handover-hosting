@@ -526,8 +526,9 @@
 
     # Unattended upgrades install kernels but never reboot, and player
     # containers share the host kernel, so pending kernels must take effect.
-    # Every night at 04:00 Israel time: reboot only if one is pending and
-    # nobody is playing (players resume afterwards); otherwise try next night.
+    # Every night at 04:00 Israel time: reboot if one is pending and nobody is
+    # playing; otherwise try next night, but after 72 h reboot anyway with a
+    # 10-minute warning in every open terminal (players resume afterwards).
     - name: Reboot-when-needed script
       ansible.builtin.copy:
         dest: /usr/local/sbin/handover-maybe-reboot
@@ -535,13 +536,36 @@
         content: |
           #!/bin/sh
           # Managed by host/site.yml. DRY_RUN=1 prints the decision only.
-          [ -f /run/reboot-required ] || { echo "no reboot pending"; exit 0; }
+          # A pending reboot waits for a night with nobody playing, but at most
+          # MAX_WAIT_H hours: then every open terminal is warned and it reboots
+          # NOTICE_MIN minutes later. Players resume from their saves.
+          MAX_WAIT_H=${MAX_WAIT_H:-72}
+          NOTICE_MIN=${NOTICE_MIN:-10}
+          # When this script first saw the pending reboot. Not the age of
+          # /run/reboot-required: Ubuntu rewrites that for every new package
+          # needing a reboot, so steady updates would reset the clock. /run is
+          # emptied at boot, so the marker goes with the reboot.
+          since=/run/handover-reboot-pending-since
+          [ -f /run/reboot-required ] || { rm -f "$since"; echo "no reboot pending"; exit 0; }
+          [ -f "$since" ] || date +%s > "$since"
+          waited_h=$(( ($(date +%s) - $(cat "$since")) / 3600 ))
           why=$(tr '\n' ' ' < /run/reboot-required.pkgs 2>/dev/null)
           players=$(curl -s -m 5 http://127.0.0.1:8080/healthz |
             python3 -c 'import json, sys; print(json.load(sys.stdin)["players"])' 2>/dev/null)
           if [ "$players" != 0 ]; then
-            logger -t handover-reboot -s "reboot pending ($why), players=${players:-unknown}: next night"
-            exit 0
+            if [ "$waited_h" -lt "$MAX_WAIT_H" ]; then
+              logger -t handover-reboot -s "reboot pending ${waited_h}h ($why), players=${players:-unknown}: next night (forced after ${MAX_WAIT_H}h)"
+              exit 0
+            fi
+            logger -t handover-reboot -s "reboot pending ${waited_h}h ($why), players=${players:-unknown}: warning terminals, rebooting in ${NOTICE_MIN} min"
+            if [ -z "${DRY_RUN:-}" ]; then
+              msg="\r\n*** The Handover: this server restarts in ${NOTICE_MIN} minutes for a security update."
+              msg="$msg Your progress is saved: press Play again afterwards to resume. ***\r\n"
+              for c in $(incus list --project handover -c n -f csv); do
+                incus exec --project handover "$c" -- sh -c 'for t in /dev/pts/[0-9]*; do printf "$1" > "$t"; done' sh "$msg" </dev/null 2>/dev/null || true
+              done
+              sleep $((NOTICE_MIN * 60))
+            fi
           fi
           logger -t handover-reboot -s "rebooting for: $why"
           [ -n "${DRY_RUN:-}" ] || systemctl reboot

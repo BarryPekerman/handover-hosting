@@ -215,8 +215,10 @@ shape, while nobody plays (they refuse otherwise): see `tests/README.md`.
 ## Reboots
 
 Kernel updates install unattended; `handover-maybe-reboot.timer` (04:00 Israel
-time) reboots only when `/run/reboot-required` exists and `/healthz` says 0
-players, otherwise it waits for the next night. Decision without rebooting:
+time) reboots when `/run/reboot-required` exists and `/healthz` says 0
+players, otherwise it waits for the next night, but at most 72 h (counted from
+when the script first saw it, `/run/handover-reboot-pending-since`): then it
+writes a 10-minute warning into every open terminal and reboots anyway. Decision without rebooting:
 `sudo env DRY_RUN=1 /usr/local/sbin/handover-maybe-reboot`; history:
 `journalctl -t handover-reboot`. After a reboot, player containers are gone
 (they don't autostart); the spawner drops their sessions and players resume.
