@@ -111,4 +111,4 @@ and the disk it wrote. `MEM=256MiB` tries a tighter limit on that box only.
 Usage is at the top of the script.
 
 Results from 20 October 2026, and why the limit is 60 players, are in
-`docs/ops-notes.md` (Capacity).
+`docs/operations.md` (Capacity).

@@ -4,7 +4,7 @@
     sudo python3 scripts/results.py /var/lib/handover/handover-leaderboard.db > results.md
 
 Run it on the host (next to spawner/gamedata.py, which deploy.yml copies to /opt/handover),
-or in a checkout on a copy from the nightly backup (docs/ops-notes.md). Prints
+or in a checkout on a copy from the nightly backup (docs/operations.md). Prints
 Markdown: players, how far they got, time per level (wall clock and active),
 wrong passwords and the commands used on each level. Only totals and averages:
 no player ids, no full command lines, so the output is safe to publish. The

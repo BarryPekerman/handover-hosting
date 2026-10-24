@@ -35,7 +35,7 @@
 !Makefile
 !README.md
 !docs/hardening-plan.md
-!docs/ops-notes.md
+!docs/operations.md
 !docs/pipeline-plan.md
 !host/deploy-keys/the-handover-linux-ctf.pub
 !host/deploy-keys/handover-hosting.pub
