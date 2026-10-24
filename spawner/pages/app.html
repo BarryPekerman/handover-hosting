@@ -46,7 +46,7 @@ Stays in your browser &mdash; never sent to the server."></textarea>
 <button id=toggle>notes</button>
 <button id=copy>copy</button>
 <section id=shot class=hidden>
-  <div><span>Long-press to select, then Copy.</span><button id=shotclose>back</button></div>
+  <div><span>Tap a word to copy it.</span><button id=shotclose>back</button></div>
   <pre id=shottext></pre>
 </section>
 <script nonce="__NONCE__">
@@ -74,8 +74,23 @@ document.getElementById('copy').addEventListener('click',function(){
   shottext.textContent=screenText(t,300);
   t.blur();shot.classList.remove('hidden');shottext.scrollTop=shottext.scrollHeight;
 });
-document.getElementById('shotclose').addEventListener('click',function(){
-  shot.classList.add('hidden');var t=termOf();if(t)t.focus();
+function closeShot(){shot.classList.add('hidden');var t=termOf();if(t)t.focus();}
+document.getElementById('shotclose').addEventListener('click',closeShot);
+// A tap copies the word under the finger (any run of non-spaces: a password,
+// a path) and goes back to the terminal; long-press still selects freely.
+shottext.addEventListener('click',function(e){
+  var r=document.caretRangeFromPoint?document.caretRangeFromPoint(e.clientX,e.clientY):null;
+  if(!r||r.startContainer.nodeType!==3)return;
+  var txt=r.startContainer.data,i=r.startOffset,a=i,b=i;
+  while(a>0&&!/\s/.test(txt[a-1]))a--;
+  while(b<txt.length&&!/\s/.test(txt[b]))b++;
+  if(a===b)return;
+  var word=txt.slice(a,b),sel=getSelection(),rg=document.createRange();
+  rg.setStart(r.startContainer,a);rg.setEnd(r.startContainer,b);sel.removeAllRanges();sel.addRange(rg);
+  if(!navigator.clipboard){toast('Selected: use Copy');return;}
+  navigator.clipboard.writeText(word).then(function(){
+    sel.removeAllRanges();closeShot();toast('Copied. Paste it at the prompt.');
+  },function(){toast('Selected: use Copy');});
 });
 __SAVE_JS__
 var st=document.getElementById('st'),noted=false;
