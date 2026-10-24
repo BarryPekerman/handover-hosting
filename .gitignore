@@ -68,6 +68,8 @@
 !spawner/gamedata.py
 !spawner/headers.py
 !spawner/metrics.py
+!spawner/pages.py
+!spawner/progress.py
 !spawner/spawner.py
 !spawner/pages/app.html
 !spawner/pages/landing.html
