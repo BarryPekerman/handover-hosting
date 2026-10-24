@@ -37,6 +37,16 @@ variable "subnet_ocid" {
   type        = string
 }
 
+variable "vcn_ocid" {
+  description = "Existing VCN the security list belongs to"
+  type        = string
+}
+
+variable "securitylist_ocid" {
+  description = "Existing default security list to import and manage"
+  type        = string
+}
+
 variable "ssh_public_key" {
   description = "Public key placed in the instance's authorized_keys (only used at creation)"
   type        = string

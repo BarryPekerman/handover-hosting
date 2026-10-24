@@ -4,7 +4,7 @@
 # Break-glass (tunnel down): add TCP 22 from your IP here, or in the console.
 resource "oci_core_security_list" "default" {
   compartment_id = var.compartment_ocid
-  vcn_id         = "ocid1.vcn.oc1.il-jerusalem-1.amaaEXAMPLE"
+  vcn_id         = var.vcn_ocid
   display_name   = "Default Security List for Basic-VCN"
 
   egress_security_rules {
@@ -44,5 +44,5 @@ resource "oci_core_security_list" "default" {
 
 import {
   to = oci_core_security_list.default
-  id = "ocid1.securitylist.oc1.il-jerusalem-1.aaaaEXAMPLE"
+  id = var.securitylist_ocid
 }
