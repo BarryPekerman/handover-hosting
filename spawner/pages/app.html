@@ -15,12 +15,25 @@ font-family:monospace;font-size:.85rem;line-height:1.5;resize:none;outline:none}
 #toggle{position:fixed;top:.4rem;right:.4rem;z-index:10;background:#021;color:#33ff66;
 border:1px solid #0a3;padding:.35rem .7rem;cursor:pointer;font-family:monospace;display:none}
 .hidden{display:none!important}
+/* Phones can't select text in the terminal (a canvas), so "copy" shows its
+   recent lines as plain text, where long-press select and Copy work. */
+#copy{position:fixed;top:.4rem;right:calc(min(300px,42vw) + .4rem);z-index:10;background:#021;
+color:#33ff66;border:1px solid #0a3;padding:.35rem .7rem;font-family:monospace;display:none}
+@media(pointer:coarse){#copy{display:block}}
+#shot{position:fixed;inset:0;z-index:30;background:#000;display:flex;flex-direction:column}
+#shot div{display:flex;justify-content:space-between;align-items:center;gap:.6rem;
+padding:.5rem .7rem;border-bottom:1px solid #0a3;font-size:.8rem}
+#shot div span{opacity:.7}
+#shot button{background:#021;color:#33ff66;border:1px solid #0a3;padding:.35rem .8rem;font-family:monospace}
+#shottext{flex:1;margin:0;padding:.7rem;overflow:auto;font-size:15px;line-height:1.45;
+white-space:pre-wrap;overflow-wrap:anywhere;-webkit-user-select:text;user-select:text}
 #toast{position:fixed;top:.6rem;left:50%;transform:translateX(-50%);z-index:20;
 background:#021;border:1px solid #33ff66;padding:.5rem .9rem;max-width:90vw;transition:opacity .6s}
 @media(max-width:700px){
   #notes{position:fixed;top:0;right:0;height:100vh;width:82vw;max-width:none;z-index:9;
     box-shadow:-8px 0 24px #000}
   #toggle{display:block}
+  #copy{right:5.6rem}
 }
 </style></head><body>
 <iframe id=term src="/t/__SID__/" title="terminal"></iframe>
@@ -31,6 +44,11 @@ background:#021;border:1px solid #33ff66;padding:.5rem .9rem;max-width:90vw;tran
 Stays in your browser &mdash; never sent to the server."></textarea>
 </aside>
 <button id=toggle>notes</button>
+<button id=copy>copy</button>
+<section id=shot class=hidden>
+  <div><span>Long-press to select, then Copy.</span><button id=shotclose>back</button></div>
+  <pre id=shottext></pre>
+</section>
 <script nonce="__NONCE__">
 var pad=document.getElementById('pad'),notes=document.getElementById('notes'),
     tg=document.getElementById('toggle'),KEY='handover-notes';
@@ -38,6 +56,27 @@ try{pad.value=localStorage.getItem(KEY)||'';}catch(e){}
 pad.addEventListener('input',function(){try{localStorage.setItem(KEY,pad.value);}catch(e){}});
 tg.addEventListener('click',function(){notes.classList.toggle('hidden');});
 if(matchMedia('(max-width:700px)').matches)notes.classList.add('hidden');
+var shot=document.getElementById('shot'),shottext=document.getElementById('shottext');
+function termOf(){try{return document.getElementById('term').contentWindow.term||null;}catch(e){return null;}}
+// The terminal's last lines as plain text; lines the terminal wrapped are joined again.
+function screenText(t,max){
+  var b=t.buffer.active,out=[];
+  for(var i=Math.max(0,b.length-max);i<b.length;i++){
+    var l=b.getLine(i);if(!l)continue;var s=l.translateToString(true);
+    if(l.isWrapped&&out.length)out[out.length-1]+=s;else out.push(s);
+  }
+  while(out.length&&!out[out.length-1].trim())out.pop();
+  return out.join('\n');
+}
+document.getElementById('copy').addEventListener('click',function(){
+  var t=termOf();
+  if(!t){toast("Can't read the terminal from here.");return;}
+  shottext.textContent=screenText(t,300);
+  t.blur();shot.classList.remove('hidden');shottext.scrollTop=shottext.scrollHeight;
+});
+document.getElementById('shotclose').addEventListener('click',function(){
+  shot.classList.add('hidden');var t=termOf();if(t)t.focus();
+});
 __SAVE_JS__
 var st=document.getElementById('st'),noted=false;
 function toast(t){var d=document.createElement('div');d.id='toast';d.textContent=t;
