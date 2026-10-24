@@ -6,7 +6,7 @@ name: backup
 # uploaded to the private OCI bucket handover-backups (infra/storage.tf) as
 # handover-backup, which can add objects but not delete or overwrite them; the
 # bucket deletes each after 30 days. restore-test.yml checks monthly that the
-# newest one decrypts and opens. Restore: docs/ops-notes.md.
+# newest one decrypts and opens. Restore: docs/operations.md.
 on:
   schedule:
     - cron: "17 2 * * *"     # 02:17 UTC, a quiet hour

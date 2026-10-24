@@ -34,8 +34,9 @@ flowchart LR
   goes through Cloudflare Access. The VM's security list allows only ping.
 - **One-click rebuild.** `rebuild.yml` recreates the VM, DNS, tunnel and secrets
   from Terraform, then deploys; rehearsed from nothing in about 10 minutes.
-- **Approval is a manual dispatch.** Pushes only run checks; deploys run when
-  someone starts them. The game image is built and tested once, then promoted.
+- **Deploys never kick players.** Merging to `main` is the spawner's approval:
+  once CI passes, it deploys when nobody is playing. The game image is built
+  and tested once, then promoted by hand.
 - **Monitoring from outside.** Prometheus in a separate OKE cluster
   ([oci-oke-infra](https://github.com/BarryPekerman/oci-oke-infra)) scrapes the
   spawner and node-exporter through Access-protected tunnel routes.
@@ -114,13 +115,19 @@ boxes, not the host. `host/site.yml` sets it all up.
 
 ### Deploying
 
-Manual on purpose (starting it is the approval):
-`gh workflow run deploy.yml -R BarryPekerman/handover-hosting` applies the host
-playbook (including the tunnel connector, with its run token), copies the
-spawner, writes the secrets and restarts
-the service. It only deploys a commit on `main` whose CI passed, and fails
-unless the spawner comes back healthy.
-Pushes only run `ci.yml`. Infra: `infra/README.md`.
+Automatic once nobody is playing: when `ci` passes on `main` (and every night
+as a retry), `auto-deploy.yml` checks whether `spawner/` or `host/` changed
+since the last successful deploy. If so, it waits up to 5.5 h for 0 players on
+`/healthz`, then runs `deploy.yml`; if players stay on, the run fails and the
+next night tries again. A spawner restart ends open games (players resume
+from their saves), which is why it waits.
+
+`deploy.yml` applies the host playbook (including the tunnel connector, with
+its run token), copies the spawner, writes the secrets and restarts the
+service. It only deploys a commit on `main` whose CI passed, and fails unless
+the spawner comes back healthy. To deploy at once, by hand:
+`gh workflow run deploy.yml -R BarryPekerman/handover-hosting`.
+Branches and PRs only run `ci.yml`. Infra: `infra/README.md`.
 
 ## Isolation
 
@@ -135,6 +142,6 @@ It's a terminal game, so it's played with a keyboard: best on a computer. On a
 phone you can read the story and look around; sign in with GitHub and the same
 box opens on every device, so you can pick it up on a laptop.
 
-Day-to-day operation: `docs/ops-notes.md`.
+How it runs (deploys, capacity, backups, hardening): `docs/operations.md`.
 
 Design rationale: `HOSTING.md` in the (private) game repo.

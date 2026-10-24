@@ -47,7 +47,7 @@ output "images_bucket" {
 # Written by handover-backup, which may add and read objects but not delete
 # them (../infra-iam). Each backup is kept 30 days, the time the story page
 # promises raw records outlive the game; closing the game empties the bucket
-# (docs/ops-notes.md). A few KB a night, well inside Always Free's 20 GB.
+# (docs/operations.md). A few KB a night, well inside Always Free's 20 GB.
 resource "oci_objectstorage_bucket" "backups" {
   #checkov:skip=CKV_OCI_7:Oracle-managed encryption; the objects are already gpg-encrypted before upload
   #checkov:skip=CKV_OCI_8:versioning would keep deleted backups past the 30 days promised

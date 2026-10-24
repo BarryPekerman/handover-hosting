@@ -59,7 +59,7 @@ everything after them is code.**
    stays closed. On a new box `DEPLOY_KNOWN_HOSTS` must be updated to its
    host key first (`ssh handover` from a laptop shows it).
 3. `gh workflow run deploy-image.yml -R BarryPekerman/the-handover-linux-ctf`: the newest tested image from the `handover-images` bucket (`-f run_id=<id>` for an older stored one).
-4. Restore the leaderboard from the newest backup in the `handover-backups` bucket (docs/ops-notes.md).
+4. Restore the leaderboard from the newest backup in the `handover-backups` bucket (docs/operations.md).
 
 Measured in the drill (2026-10-19, instance only): destroy 2m15s, create
 2m09s, tunnel up by itself 1m59s, deploy.yml 3m36s, deploy-image 59s — about
