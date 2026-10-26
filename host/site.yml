@@ -94,11 +94,22 @@
         name: prometheus-node-exporter
         state: restarted
 
+    # Ansible reaches the host through this tunnel, so a plain restart cuts the
+    # playbook's own connection (UNREACHABLE). Restart in the background, then
+    # reconnect once the connector is back.
     - name: Restart tunnel connector
       ansible.builtin.systemd:
         name: cloudflared-tf
         state: restarted
         daemon_reload: true
+      async: 60
+      poll: 0
+
+    - name: Wait for the tunnel to come back
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 180
+      listen: Restart tunnel connector
 
   tasks:
     - name: Packages
