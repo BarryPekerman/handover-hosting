@@ -52,7 +52,7 @@ m spawner/common.py '    except Exception:
         log.exception("events write failed")' '    finally:
         pass' "a database error breaks play"
 # leaderboard scoring
-m spawner/spawner.py 'unranked=MAX(COALESCE(players.unranked,0), excluded.unranked)' 'unranked=excluded.unranked' "a later clean poll clears unranked"
+m spawner/progress.py 'unranked=MAX(COALESCE(players.unranked,0), excluded.unranked)' 'unranked=excluded.unranked' "a later clean poll clears unranked"
 m spawner/spawner.py 'WHERE finished=1 AND COALESCE(unranked,0)=0' 'WHERE finished=1' "unranked runs on the leaderboard"
 m spawner/spawner.py 'ORDER BY accumulated ASC' 'ORDER BY accumulated DESC' "leaderboard slowest first"
 m spawner/spawner.py '{html.escape(d)}' '{d}' "player names not escaped on the leaderboard"
