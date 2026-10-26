@@ -106,7 +106,7 @@ resource "oci_core_instance" "handover" {
     ])
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
       tunnel_token        = data.cloudflare_zero_trust_tunnel_cloudflared_token.handover.token
-      cloudflared_version = "2026.10.1" # keep in step with host/site.yml
+      cloudflared_version = "2026.10.3" # keep in step with host/site.yml
       host_key_private    = tls_private_key.host.private_key_openssh
       host_key_public     = trimspace(tls_private_key.host.public_key_openssh)
     }))

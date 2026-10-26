@@ -15,7 +15,7 @@
   # sees the file unchanged and doesn't apply it either.
   force_handlers: true
   vars:
-    cloudflared_version: "2026.10.1"
+    cloudflared_version: "2026.10.3"
     # Run token for the Terraform-made tunnel (infra/tunnel.tf). deploy.yml
     # passes it from the CF_TUNNEL_TOKEN secret; when absent (e.g. a dry run
     # from a laptop) the connector tasks are skipped.
