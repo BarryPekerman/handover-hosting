@@ -192,6 +192,20 @@ def test_empty_leaderboard_says_so():
 
 # ---- play: who gets a box ----------------------------------------------------
 
+@pytest.mark.parametrize("via", [{"X-Forwarded-Proto": "http"}, {"CF-Visitor": '{"scheme":"http"}'}])
+def test_plain_http_goes_to_https_without_a_box(boxes, via):
+    # Over http the Secure cookies are dropped, so each Play press started a box
+    started, _ = boxes
+    status, h, _, _ = call("POST", "/play?x=1", data={"mode": "fresh"}, headers=via)
+    assert (status, h["Location"], started) == (308, "https://play.barrypekerman.com/play?x=1", [])
+
+
+def test_https_is_served(boxes):
+    status, _, _, _ = call("GET", "/", headers={"X-Forwarded-Proto": "https",
+                                                "CF-Visitor": '{"scheme":"https"}'})
+    assert status == 200
+
+
 def test_a_get_never_starts_a_box(boxes):
     started, _ = boxes
     status, h, _, _ = call("GET", "/play")

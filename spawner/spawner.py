@@ -53,6 +53,7 @@ import sys
 import time
 from aiohttp import web, ClientSession, WSMsgType, WSCloseCode
 
+import auth
 import common
 import headers
 from common import (
@@ -785,8 +786,26 @@ async def h_static(request):
                                            "Cache-Control": "public, max-age=86400"})
 
 
+def came_over_http(request) -> bool:
+    """True if the visitor reached Cloudflare over plain http (the tunnel to us
+    is always http, so only Cloudflare's headers tell)."""
+    return (request.headers.get("X-Forwarded-Proto", "").lower() == "http"
+            or '"scheme":"http"' in request.headers.get("CF-Visitor", "").replace(" ", ""))
+
+
+@web.middleware
+async def https_only(request, handler):
+    """Plain-http visitors go to https. The cookies are Secure, so over http the
+    browser drops them: every Play press started a new box and /app sent the
+    player back to the landing page (LinkedIn's in-app browser opens links as
+    http). 308 keeps a POST a POST. HSTS only takes effect once on https."""
+    if auth.SECURE_COOKIES and came_over_http(request):
+        return web.Response(status=308, headers={"Location": common.PUBLIC_URL + request.path_qs})
+    return await handler(request)
+
+
 def make_app():
-    app = web.Application()
+    app = web.Application(middlewares=[https_only])
     app.on_response_prepare.append(headers.add_headers)   # CSP, HSTS, framing (headers.py)
     app.add_routes([
         web.get("/", h_landing),
