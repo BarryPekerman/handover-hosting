@@ -35,6 +35,7 @@ m spawner/auth.py 'if not q or now - q[-1] >= RATE_WINDOW]' 'if False]' "throttl
 m spawner/auth.py 'SECURE_COOKIES = PUBLIC_URL.startswith("https://")' 'SECURE_COOKIES = False' "id cookies allowed over plain http"
 m spawner/spawner.py 'if not TS_SECRET and os.environ.get("ALLOW_NO_TURNSTILE") != "1":' 'if False:' "spawner runs without the bot check"
 m spawner/auth.py 'secure=True, ' '' "sign-in cookie not Secure"
+m spawner/spawner.py 'if auth.SECURE_COOKIES and came_over_http(request):' 'if False:' "plain-http visitors not sent to https (cookies dropped, a box per Play)"
 m spawner/auth.py 'pid = pid if PID_RE.fullmatch(pid) else secrets.token_hex(16)' 'pid = pid or secrets.token_hex(16)' "player id cookie not validated"
 m spawner/metrics.py 'if idx in counted:' 'if False:' "levels counted every poll"
 m spawner/metrics.py 'ranked = s.get("start", 0) == 0 and' 'ranked = True or' "resumed runs ranked"
