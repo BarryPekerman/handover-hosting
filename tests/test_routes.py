@@ -362,6 +362,12 @@ def test_every_script_on_a_page_carries_that_responses_nonce(monkeypatch):
     assert "https://challenges.cloudflare.com" in p["script-src"] and "https://challenges.cloudflare.com" in p["frame-src"]
 
 
+def test_a_play_press_can_wait_for_the_bot_check(monkeypatch):
+    monkeypatch.setattr(sp, "TS_SITEKEY", "1x00000000000000000000AA")
+    page = call("GET", "/")[2]
+    assert 'data-callback="tsDone"' in page and "window.tsDone=" in page
+
+
 def test_the_nonce_is_new_for_every_response():
     a, b = (csp(call("GET", "/")[1])["script-src"] for _ in range(2))
     assert a != b

@@ -176,6 +176,7 @@ async def verify_turnstile(token: str, ip: str) -> bool:
     if not TS_SECRET:
         return True
     if not token:
+        log.warning("turnstile reject: no token")
         return False
     body = {"secret": TS_SECRET, "response": token, "remoteip": ip}
     try:

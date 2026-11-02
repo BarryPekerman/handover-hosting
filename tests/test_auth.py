@@ -207,8 +207,9 @@ def test_turnstile_rejects(monkeypatch, reply):
     assert not turnstile(monkeypatch, reply)()
 
 
-def test_turnstile_rejects_a_missing_token(monkeypatch):
+def test_turnstile_rejects_a_missing_token(monkeypatch, caplog):
     assert not turnstile(monkeypatch, {"success": True})("")
+    assert "no token" in caplog.text
 
 
 # ---- GitHub sign-in ------------------------------------------------------
