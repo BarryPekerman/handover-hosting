@@ -14,6 +14,7 @@ background:none;font-family:monospace;font-size:1.2rem;cursor:pointer}
 .play:hover{background:#33ff66;color:#000}
 p{max-width:34rem;line-height:1.5;padding:0 1rem}
 .cf-turnstile{margin-top:.3rem}
+.wait{opacity:.8;font-size:.9rem}
 .notice{margin-top:1.4rem;opacity:.55;font-size:.8rem}
 </style>__TS_SCRIPT__</head><body>
 <h1>THE HANDOVER</h1>
@@ -21,7 +22,7 @@ p{max-width:34rem;line-height:1.5;padding:0 1rem}
 <form method="post" action="/play"><input type=hidden name=save id=save>
 <button class=play type=submit name=mode value=resume id=resume hidden></button>
 <button class=play type=submit name=mode value=fresh id=fresh>&gt; play</button>
-__TS_WIDGET__</form>
+__TS_WIDGET__<p class=wait id=wait hidden>checking you're human - if a box shows up, tick it. Play goes through by itself.</p></form>
 <p class=links><a href="/story">story &amp; how to play</a>
 &nbsp;&middot;&nbsp; <a href="/leaderboard">leaderboard</a></p>
 <p class=signin>__SIGNIN__</p>
@@ -35,6 +36,26 @@ for a public breakdown when the game closes. <a href="/story#record">What we rec
   r.hidden=false;r.textContent='> resume at level '+n;
   document.getElementById('fresh').textContent='> start from level 0';
   document.getElementById('save').value=JSON.stringify({levels:lv});
+})();
+// Play pressed before Turnstile has a token: hold the press and let it through
+// when the token lands. After 20 s send it anyway, so a widget that never loads
+// (some in-app browsers) gets the server's "couldn't verify you" page, not a dead button.
+(function(){
+  var form=document.querySelector('form'),wait=document.getElementById('wait'),
+      pressed=null,timer=0,pass=!document.querySelector('.cf-turnstile');
+  function go(){
+    pass=true;clearTimeout(timer);wait.hidden=true;
+    if(pressed){var b=pressed;pressed=null;b.click();}
+  }
+  window.tsDone=function(){if(pressed)go();};
+  form.querySelectorAll('.play').forEach(function(b){
+    b.addEventListener('click',function(e){
+      var t=form.elements['cf-turnstile-response'];
+      if(pass||(t&&t.value))return;
+      e.preventDefault();pressed=b;wait.hidden=false;
+      clearTimeout(timer);timer=setTimeout(go,20000);
+    });
+  });
 })();
 </script>
 </body></html>

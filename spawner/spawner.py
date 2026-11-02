@@ -492,7 +492,7 @@ async def h_landing(request):
         script = ('<script nonce="__NONCE__" src="https://challenges.cloudflare.com/turnstile/v0/api.js"'
                   ' async defer></script>')
         widget = (f'<div class="cf-turnstile" data-sitekey="{TS_SITEKEY}"'
-                  f' data-action="{TS_ACTION}" data-theme="dark"></div>')
+                  f' data-action="{TS_ACTION}" data-theme="dark" data-callback="tsDone"></div>')
     else:
         script = widget = ""
     uid, disp = identity(request)

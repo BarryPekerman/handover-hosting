@@ -64,6 +64,7 @@ m spawner/spawner.py 'finished = 1 if new_max >= WIN_INDEX else finished' 'finis
 m spawner/spawner.py 'web.get("/play", h_play_get)' 'web.get("/play", h_play)' "a GET starts a box"
 m spawner/spawner.py '    if throttled(ip):' '    if False:' "no per-IP limit on new boxes"
 m spawner/spawner.py 'if not await verify_turnstile(' 'if False and not await verify_turnstile(' "bot check result ignored"
+m spawner/spawner.py ' data-callback="tsDone"' '' "a press before the bot check is ready never goes through"
 m spawner/spawner.py 'if not owns(request, sid):       # not your session' 'if False:' "anyone opens any terminal"
 m spawner/spawner.py 'if not s or not owns(request, sid):' 'if not s:' "anyone reads any save's passwords"
 m spawner/spawner.py 'headers={"Cache-Control": "no-store"}' 'headers={}' "saved passwords cacheable"
