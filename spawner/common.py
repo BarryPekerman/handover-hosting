@@ -63,7 +63,8 @@ PID_RE = re.compile(r"[0-9a-f]{32}")
 def db():
     c = sqlite3.connect(DB_PATH)
     # key = GitHub uid for logged-in players (persists across sessions), or
-    # "anon:<sid>" for anonymous players (single-session). accumulated = sum of
+    # "anon:<pid>" for anonymous players (the browser's player id; "anon:<sid>"
+    # for boxes from before pids). accumulated = sum of
     # each level's solve time, counted once.
     c.execute("CREATE TABLE IF NOT EXISTS players "
               "(key TEXT PRIMARY KEY, display TEXT, max_level INTEGER, "

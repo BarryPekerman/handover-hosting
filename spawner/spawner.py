@@ -134,13 +134,15 @@ async def read_reaches(ct: str) -> dict[int, int]:
 
 async def update_progress(sid: str, ct: str):
     """Fold this container's progress into the player's running tally. Keyed by
-    GitHub uid (cross-session) or anon:<sid> (single session). Adds only the
+    GitHub uid, else anon:<pid> (the browser's year-long player id, so an
+    anonymous player's sessions add up even after the day-long box cookie
+    expires; anon:<sid> for a box with no pid). Adds only the
     time for levels newly completed since the stored max, so fast re-climbs with
     saved passwords don't double-count and between-session breaks never count.
     Always pushes the player's current total back into the container for the
     victory screen."""
     info = who.get(sid) or {"uid": None, "display": "anonymous"}
-    key = info["uid"] or ("anon:" + sid)
+    key = info["uid"] or ("anon:" + (pids.get(sid) or sid))
     reaches = await read_reaches(ct)
     s = sessions.get(sid)
     if s is not None:

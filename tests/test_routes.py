@@ -151,6 +151,16 @@ def test_a_resume_past_what_the_account_played_is_unranked(box_reads):
     assert players()[0][3:] == (1, 1)                     # finished, but unranked
 
 
+def test_anonymous_sessions_add_up_by_player_id(box_reads):
+    # The box cookie lasts a day; a player back days later gets a new sid but
+    # keeps the pid cookie, and resumes from the browser save.
+    live("s1"); common.pids["s1"] = "p1"
+    poll("s1", climb(14), box_reads)
+    live("s2", start=14); common.pids["s2"] = "p1"
+    poll("s2", {i: 9000 + 60 * (i - 14) for i in range(14, WIN + 1)}, box_reads)
+    assert players() == [("anon:p1", WIN, 60 * WIN, 1, 0)]
+
+
 def test_jumping_levels_is_unranked(box_reads):
     live("s1")
     poll("s1", {0: 1000, 1: 1060, WIN: 1100}, box_reads)  # straight to dave with a shared password
