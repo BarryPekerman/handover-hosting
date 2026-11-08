@@ -23,7 +23,8 @@ runs:
         CF_SECRET: ${{ inputs.access-client-secret }}
         WAIT: ${{ inputs.wait-seconds }}
       run: |
-        curl -fsSL -o /tmp/cloudflared.deb \
+        # --retry covers a GitHub 5xx/timeout on the release download (a 504 failed the 11-08 backup)
+        curl --retry 3 -fsSL -o /tmp/cloudflared.deb \
           https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-amd64.deb
         sudo dpkg -i /tmp/cloudflared.deb >/dev/null
         install -m 700 -d ~/.ssh
