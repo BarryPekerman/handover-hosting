@@ -419,3 +419,15 @@ def test_the_landing_page_sends_phones_to_the_tap_game():
     assert '<a href="/tap">phone game</a>' in body
     tap = call("GET", "/tap")[2]
     assert 'GAME_URL + "/?terminal"' in tap                   # its links back don't bounce
+
+
+def test_the_tap_game_has_its_own_link_preview():
+    tap = call("GET", "/tap")[2]
+    assert 'property="og:image" content="https://play.barrypekerman.com/tap-og.png"' in tap
+    assert 'property="og:url" content="https://play.barrypekerman.com/tap"' in tap
+    assert "twitter:card" in tap
+    path = os.path.join(sp.STATIC_DIR, "tap-og.png")
+    with open(path, "rb") as f:
+        head = f.read(24)
+    assert head[:8] == b"\x89PNG\r\n\x1a\n"
+    assert (int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")) == (1200, 627)

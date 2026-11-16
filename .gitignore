@@ -81,6 +81,7 @@
 !spawner/pages/tap.html
 !spawner/static/favicon.png
 !spawner/static/og.png
+!spawner/static/tap-og.png
 !tests/README.md
 !tests/mutations.sh
 !tests/save.test.mjs
