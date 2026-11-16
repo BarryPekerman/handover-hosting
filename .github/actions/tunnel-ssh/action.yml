@@ -9,7 +9,7 @@ inputs:
   access-client-id: { description: "CF_ACCESS_CLIENT_ID", required: true }
   access-client-secret: { description: "CF_ACCESS_CLIENT_SECRET", required: true }
   wait-seconds:
-    description: "keep retrying the first connection this long (a box still booting)"
+    description: "keep retrying the first connection this long (a box still booting); at least 60 s"
     required: false
     default: "0"
 runs:
@@ -46,7 +46,13 @@ runs:
           IdentitiesOnly yes
           StrictHostKeyChecking yes
           ProxyCommand ~/.ssh/cf-proxy %h
+          # a connection that went dead fails in about a minute instead of hanging
+          ServerAliveInterval 15
+          ServerAliveCountMax 4
         CFG
+        # Always a few attempts: on 11-16 a deploy failed on one timed-out
+        # first connection while the host was fine.
+        [ "$WAIT" -ge 60 ] || WAIT=60
         deadline=$(( $(date +%s) + WAIT ))
         until ssh -o ConnectTimeout=15 handover true; do
           [ "$(date +%s)" -lt "$deadline" ] || { echo "::error::host not reachable through the tunnel"; exit 1; }
