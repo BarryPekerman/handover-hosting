@@ -138,9 +138,12 @@ rule. Verified: a player container has only `lo`.
 
 ## Devices
 
-It's a terminal game, so it's played with a keyboard: best on a computer. On a
-phone you can read the story and look around; sign in with GitHub and the same
-box opens on every device, so you can pick it up on a laptop.
+It's a terminal game, so it's played with a keyboard: best on a computer. A
+phone that opens the front page is sent to the tap game (`/tap`, two minutes,
+no typing); its "terminal game anyway" link (`/?terminal`) brings a phone back
+and is remembered. Phones with a save or signed-in progress aren't sent away.
+Sign in with GitHub and the same box opens on every device, so you can pick it
+up on a laptop.
 
 How it runs (deploys, capacity, backups, hardening): `docs/operations.md`.
 

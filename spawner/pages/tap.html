@@ -93,6 +93,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--good);outline-offse
 .go:disabled{opacity:.4}
 .go.link{display:flex;align-items:center;justify-content:center;text-decoration:none}
 .go.alt{background:none;color:var(--ink);border:1px solid var(--line)}
+.skip{align-self:center;color:var(--mute);font-size:.85em;padding:2px 8px}
 .row{display:flex;gap:8px}.row>*{flex:1}
 .cmd{direction:ltr;min-height:48px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:7px;border:2px dashed var(--line);border-radius:10px;background:var(--term)}
 .cmd::before{content:"$";color:#7fdcae;font-family:ui-monospace,Menlo,Consolas,monospace;padding-inline:3px}
@@ -126,6 +127,8 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--good);outline-offse
 </div>
 <script>
 const GAME_URL = "https://play.barrypekerman.com";
+// "?terminal" keeps a phone on the terminal game's front page, which otherwise sends phones here
+const FULL_URL = GAME_URL + "/?terminal";
 
 /* Structure: no prose here, and nothing here changes between languages. */
 const seq=l=>l.join(" ");
@@ -172,7 +175,7 @@ const ROUNDS=[
 const TEXT={
 he:{ dir:"rtl", ui:{ name:"גל", title:"עדיין רלוונטי", status:["גמור","על סף פיצוץ","עצבני","מתחיל להתעצבן","קצת לחוץ","אופטימי"], won:"מסתדר לבד", waiting:"מחכה לבוט", other:"EN",
     intro:"התפקיד שלך: בוט עזרה. גל קיבל בירושה את השרת של דייב, ודייב כבר על המטוס. המטרה: להישאר רלוונטי.",
-    how:"נוגעים בתשובות, בלי להקליד. שתי דקות. כל מה שגל עושה כאן, שחקן אמיתי עשה קודם.", start:"מתחילים ◀",
+    how:"נוגעים בתשובות, בלי להקליד. שתי דקות. כל מה שגל עושה כאן, שחקן אמיתי עשה קודם.", start:"מתחילים ◀", term:"בכל זאת למשחק בטרמינל",
     tileHint:"בונים את הפקודה מהחלקים", send:"שליחה",
     full:"למשחק המלא (במחשב)", again:"עוד סיבוב", share:"שיתוף", copied:"הקישור הועתק", left:"הסבלנות שנשארה לגל:",
     shareText:"הייתי בוט עזרה במשך שתי דקות. גל עדיין כועס." },
@@ -230,7 +233,7 @@ he:{ dir:"rtl", ui:{ name:"גל", title:"עדיין רלוונטי", status:["ג
 
 en:{ dir:"ltr", ui:{ name:"Gal", title:"Still Relevant", status:["done","on the edge","stressed","getting annoyed","a bit tense","hopeful"], won:"doing fine alone", waiting:"waiting for the bot", other:"עב",
     intro:"Your job: help bot. Dave's server just landed on Gal, and Dave is already on a plane. Your mission: stay relevant.",
-    how:"Tap the answers, no typing. Two minutes. Everything Gal does here, a real player did first.", start:"▶ Start",
+    how:"Tap the answers, no typing. Two minutes. Everything Gal does here, a real player did first.", start:"▶ Start", term:"Terminal game anyway",
     tileHint:"Build the command from the pieces", send:"Send",
     full:"Play the full game (on a computer)", again:"Play again", share:"Share", copied:"Link copied", left:"Gal's patience left:",
     shareText:"I was a help bot for two minutes. Gal is still angry." },
@@ -369,7 +372,7 @@ function render(){
   byId("prog").innerHTML=RS.map((r,n)=>`<i class="${n<g.i||won?"on":n===g.i&&S.started?"cur":""}"></i>`).join("");
   if(!S.started){
     byId("chat").innerHTML=`<div class="start"><div class="big">🤖</div><h1>${esc(t.ui.title)}</h1><p>${esc(t.ui.intro)}</p><p>${esc(t.ui.how)}</p></div>`;
-    byId("tray").innerHTML=`<button class="go" data-act="start">${esc(t.ui.start)}</button>`;
+    byId("tray").innerHTML=`<button class="go" data-act="start">${esc(t.ui.start)}</button><a class="skip" href="${FULL_URL}">${esc(t.ui.term)}</a>`;
     return;
   }
   let h=`<div class="note">${rich(t.ui.intro)}</div>`;
@@ -402,7 +405,7 @@ function render(){
 function tray(g,over){
   const t=T();
   if(over){
-    const full=`<a class="go link${over==="win"?"":" alt"}" href="${GAME_URL}">${esc(t.ui.full)}</a>`;
+    const full=`<a class="go link${over==="win"?"":" alt"}" href="${FULL_URL}">${esc(t.ui.full)}</a>`;
     const again=`<button class="go${over==="win"?" alt":""}" data-act="again">${esc(t.ui.again)}</button>`;
     const share=`<button class="go alt" data-act="share">${esc(S.copied?t.ui.copied:t.ui.share)}</button>`;
     return over==="win" ? full+`<div class="row">${share}${again}</div>` : again+full+share;
