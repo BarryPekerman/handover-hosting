@@ -408,3 +408,14 @@ def test_the_tap_game_is_a_static_page_that_starts_no_box():
     assert status == 200 and "<title>Still Relevant</title>" in body
     assert "__NONCE__" not in body
     assert not common.sessions and not common.states
+
+
+def test_the_landing_page_sends_phones_to_the_tap_game():
+    body = call("GET", "/")[2]
+    head = body.split("</head>")[0]
+    assert "location.replace('/tap')" in head                 # decided before the page shows
+    assert "handover-terminal" in head and "handover-save" in head   # the ways to stay
+    assert "var stay=0>0;" in head                            # nobody signed in: no server progress
+    assert '<a href="/tap">phone game</a>' in body
+    tap = call("GET", "/tap")[2]
+    assert 'GAME_URL + "/?terminal"' in tap                   # its links back don't bounce

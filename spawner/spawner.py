@@ -13,7 +13,8 @@ Routes:
   GET  /save/<sid>       passwords of the levels reached, for the browser's save
   GET  /leaderboard      finishers by summed solve time
   GET  /story            the premise and how to play (kept off the front page)
-  GET  /tap              the phone tap game (static, no box, no bot check)
+  GET  /tap              the phone tap game (static, no box, no bot check);
+                         the landing page sends phones here (its head script)
   GET  /login /auth/callback /logout   optional GitHub sign-in
   GET  /healthz          {"players": N, "max": M}
 

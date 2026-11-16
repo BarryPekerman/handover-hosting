@@ -1,5 +1,20 @@
 <!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">__SHARE__
+<meta name=viewport content="width=device-width,initial-scale=1">
+<script nonce="__NONCE__">
+// Phones get the tap game (/tap): the terminal needs a real keyboard. A phone
+// stays here if it came by a "?terminal" link (the tap game's own links; it is
+// remembered), has a save from earlier play, or is signed in with progress.
+// "Phone" = touch only, short side under 600px, so tablets keep the terminal.
+(function(){
+  var stay=__SRV__>0;
+  try{
+    if(/[?&]terminal\b/.test(location.search))localStorage.setItem('handover-terminal','1');
+    stay=stay||localStorage.getItem('handover-terminal')||localStorage.getItem('handover-save');
+  }catch(e){stay=stay||/[?&]terminal\b/.test(location.search);}
+  if(!stay&&window.matchMedia&&matchMedia('(hover:none) and (pointer:coarse)').matches
+     &&Math.min(screen.width,screen.height)<600)location.replace('/tap');
+})();
+</script>__SHARE__
 <title>The Handover</title><style>
 :root{color-scheme:dark}
 body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;
@@ -24,7 +39,8 @@ p{max-width:34rem;line-height:1.5;padding:0 1rem}
 <button class=play type=submit name=mode value=fresh id=fresh>&gt; play</button>
 __TS_WIDGET__<p class=wait id=wait hidden>checking you're human - if a box shows up, tick it. Play goes through by itself.</p></form>
 <p class=links><a href="/story">story &amp; how to play</a>
-&nbsp;&middot;&nbsp; <a href="/leaderboard">leaderboard</a></p>
+&nbsp;&middot;&nbsp; <a href="/leaderboard">leaderboard</a>
+&nbsp;&middot;&nbsp; <a href="/tap">phone game</a></p>
 <p class=signin>__SIGNIN__</p>
 <p class=notice>Playing records your session (commands and timings) under a random ID,
 for a public breakdown when the game closes. <a href="/story#record">What we record</a></p>
