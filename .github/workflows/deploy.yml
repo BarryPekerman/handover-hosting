@@ -84,9 +84,13 @@ jobs:
 
       - name: Copy spawner
         run: |
-          # /opt/handover belongs to ubuntu: the spawner (user handover) reads it, can't change it
-          scp spawner/*.py handover:/opt/handover/
-          scp -r spawner/static spawner/pages handover:/opt/handover/   # images; the web pages
+          # /opt/handover belongs to ubuntu: the spawner (user handover) reads it, can't change it.
+          # Copying again is harmless, so a copy whose connection broke is tried
+          # again (on 11-16 a deploy died here with "Broken pipe" and left the new
+          # files on the host without a restart).
+          retry() { for n in 1 2 3; do "$@" && return 0; echo "failed (try $n): $*"; sleep 10; done; return 1; }
+          retry scp spawner/*.py handover:/opt/handover/
+          retry scp -r spawner/static spawner/pages handover:/opt/handover/   # images; the web pages
 
       - name: Inject secrets, restart (non-destructive)
         env:
