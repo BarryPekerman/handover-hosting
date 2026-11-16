@@ -76,6 +76,9 @@ jobs:
       - name: Host config
         env:
           CF_TUNNEL_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
+          # A task whose SSH connection drops is tried again (on 11-16 a deploy
+          # lost the tunnel connection halfway through and failed as unreachable)
+          ANSIBLE_SSH_RETRIES: "3"
         run: |
           ansible-playbook -i handover, --diff host/site.yml
 
