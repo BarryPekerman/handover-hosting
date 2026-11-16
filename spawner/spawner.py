@@ -786,8 +786,8 @@ async def on_cleanup(app):
 
 
 async def h_static(request):
-    """og.png (link preview) and the favicon; cached for a day."""
-    name = {"/og.png": "og.png", "/favicon.ico": "favicon.png"}[request.path]
+    """og.png and tap-og.png (link previews) and the favicon; cached for a day."""
+    name = {"/og.png": "og.png", "/tap-og.png": "tap-og.png", "/favicon.ico": "favicon.png"}[request.path]
     path = os.path.join(STATIC_DIR, name)
     if not os.path.isfile(path):
         raise web.HTTPNotFound()
@@ -831,6 +831,7 @@ def make_app():
         web.get("/logout", h_logout),
         web.get("/healthz", h_health),
         web.get("/og.png", h_static),
+        web.get("/tap-og.png", h_static),   # the tap game's link preview
         web.get("/favicon.ico", h_static),
         web.route("*", "/t/{sid}/{tail:.*}", h_proxy),
     ])
