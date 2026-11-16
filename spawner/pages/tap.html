@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Still Relevant</title>
+<style>
+:root{--page:#cfc8bb;--bg:#e9e4da;--bar:#20302b;--bar-ink:#f4f1ea;--them:#fffdf8;--me:#cfeadb;--ink:#1d2421;--mute:#68716c;
+  --term:#101412;--term-ink:#c8d6cc;--line:#d6d0c4;--good:#1f8a57;--bad:#c2413a;--tray:#f6f2ea;--tile:#fffdf8}
+@media (prefers-color-scheme:dark){:root{--page:#090c0a;--bg:#121714;--bar:#1b2420;--them:#222b27;--me:#1f4636;--ink:#e8ece9;
+  --mute:#98a39d;--line:#34403a;--tray:#1b2420;--tile:#2a3530}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:var(--page);color:var(--ink);font:clamp(15px,.6vw + 13.5px,18px)/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%;touch-action:manipulation}
+#app{height:100vh;height:100dvh;width:100%;max-width:560px;margin-inline:auto;display:flex;flex-direction:column;overflow:hidden;
+  background:var(--bg);position:relative;padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left)}
+#app.bad{animation:flash .45s}
+@keyframes flash{30%{box-shadow:inset 0 0 0 5px var(--bad)}}
+/* tablet and desktop: the chat sits in a card */
+@media (min-width:600px) and (min-height:640px){
+  body{display:grid;place-items:center}
+  #app{height:min(92dvh,860px);border-radius:22px;box-shadow:0 20px 60px #0006}
+}
+/* a phone on its side: chat on one side, answers on the other */
+@media (orientation:landscape) and (max-height:500px){
+  #app{max-width:none;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr)}
+  header,#prog{grid-column:1/-1}
+  body{font-size:15px}
+  #tray{max-height:none!important;border-top:0!important;border-inline-start:1px solid var(--line);padding-block:8px;gap:6px}
+  #tray>:first-child{margin-top:auto}#tray>:last-child{margin-bottom:auto}
+  .tile,.opt,.go{min-height:36px}.tile{padding:4px 9px;font-size:13px}.tiles{gap:5px}.cmd{min-height:40px;padding:4px}
+  #app:has(#tray:empty) #chat{grid-column:1/-1}
+  header{padding-block:5px!important}
+}
+header{background:var(--bar);color:var(--bar-ink);padding:9px 12px;display:flex;align-items:center;gap:8px}
+.face{font-size:28px;line-height:1}
+.who{flex:1;min-width:0}.who b{display:block}.who small{opacity:.75;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hearts{font-size:clamp(11px,3.5vw,16px);letter-spacing:1px;white-space:nowrap}
+.hearts.hit{animation:shake .45s}
+.hbtn{background:none;border:1px solid #ffffff55;color:inherit;border-radius:8px;padding:0 8px;font:inherit;font-size:13px;min-height:36px;min-width:36px}
+#prog{display:flex;gap:3px;padding:0 12px 7px;background:var(--bar)}
+#prog i{flex:1;height:4px;border-radius:2px;background:#ffffff26;transition:background .3s}
+#prog i.on{background:#7fdcae}
+#prog i.cur{background:#ffffff80}
+#chat{flex:1;min-height:0;overflow-y:auto;padding:14px 14px;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain}
+#chat>*{flex:none}
+.note{align-self:center;text-align:center;font-size:.82em;color:var(--mute);max-width:90%}
+.msg{max-width:84%;padding:8px 12px;border-radius:14px;background:var(--them);align-self:flex-start;border-start-start-radius:3px;
+  overflow-wrap:anywhere}
+.new{animation:in .18s ease-out}
+.msg.me{background:var(--me);align-self:flex-end;border-radius:14px;border-start-end-radius:3px}
+.msg.upset{outline:1px solid var(--bad)}
+.msg.upset.new{animation:in .18s ease-out,shake .4s .12s}
+.msg.glad.new{animation:in .18s ease-out,glow .7s .1s}
+@keyframes in{from{opacity:0;transform:translateY(6px)}}
+@keyframes shake{20%{transform:translateX(-5px)}40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(3px)}}
+@keyframes glow{40%{box-shadow:0 0 0 3px var(--good)}}
+@keyframes pop{from{transform:scale(.7)}60%{transform:scale(1.08)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+code{direction:ltr;unicode-bidi:isolate-override;display:inline-block;max-width:100%;text-align:left;font:.92em ui-monospace,Menlo,Consolas,monospace;background:#0000000f;padding:1px 4px;border-radius:4px}
+.dots{display:flex;gap:4px;padding:12px}.dots i{width:7px;height:7px;border-radius:50%;background:var(--mute);animation:b 1s infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+@keyframes b{50%{opacity:.3}}
+.shot{direction:ltr;text-align:left;background:var(--term);color:var(--term-ink);border-radius:8px;padding:8px;width:100%;max-width:100%;
+  font:clamp(11.5px,3.3vw,13.5px)/1.35 ui-monospace,Menlo,Consolas,monospace;position:relative;overflow:hidden;align-self:flex-start}
+.shot.photo{transform:rotate(-1.6deg);border:7px solid #2b2926;margin-block:6px}
+.shot.photo::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(circle at 78% 14%,#ffffff40,transparent 42%),repeating-linear-gradient(0deg,#ffffff06 0 2px,transparent 2px 4px)}
+.shot .plain,.ln{unicode-bidi:bidi-override}
+.shot .plain{padding:3px 6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.shot .cap{color:#ffffff88;font-size:11px;padding:2px 6px 5px}
+button{position:relative;overflow:hidden;cursor:pointer;touch-action:manipulation;transition:transform .08s,background .12s,border-color .12s}
+button:active:not(:disabled){transform:scale(.96)}
+button:focus-visible,a:focus-visible{outline:2px solid var(--good);outline-offset:2px}
+.rip{position:absolute;width:140px;height:140px;margin:-70px;border-radius:50%;background:currentColor;opacity:.22;transform:scale(0);
+  animation:rip .5s ease-out forwards;pointer-events:none}
+@keyframes rip{to{transform:scale(2.2);opacity:0}}
+.ln{display:block;width:100%;text-align:left;background:none;border:0;border-radius:4px;color:inherit;font:inherit;padding:6px;min-height:38px;white-space:pre-wrap;overflow-wrap:anywhere}
+.ln.live{outline:1px dashed #ffffff33;margin-block:2px}
+.ln:disabled{opacity:.4;text-decoration:line-through}
+.ln.chosen{background:#ffffff2e}
+#tray{background:var(--tray);border-top:1px solid var(--line);padding:10px 14px calc(10px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px;
+  max-height:55dvh;overflow-y:auto}
+#tray:empty{display:none}
+.aside{align-self:center;text-align:center;font-size:.82em;background:#00000012;border-radius:10px;padding:5px 10px;max-width:92%}
+.aside.stat{background:none;border:1px dashed var(--line);color:var(--mute)}
+.hint{font-size:.82em;color:var(--mute);text-align:center}
+.opt{min-height:46px;width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:12px;background:var(--tile);color:var(--ink);font:inherit;text-align:start}
+.opt:disabled{opacity:.42;text-decoration:line-through}
+.opt.chosen{background:var(--me);border-color:var(--good)}
+.go{min-height:46px;width:100%;border:0;border-radius:12px;background:var(--good);color:#fff;font:inherit;font-weight:600}
+.go:disabled{opacity:.4}
+.go.link{display:flex;align-items:center;justify-content:center;text-decoration:none}
+.go.alt{background:none;color:var(--ink);border:1px solid var(--line)}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.cmd{direction:ltr;min-height:48px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:7px;border:2px dashed var(--line);border-radius:10px;background:var(--term)}
+.cmd::before{content:"$";color:#7fdcae;font-family:ui-monospace,Menlo,Consolas,monospace;padding-inline:3px}
+.tiles{direction:ltr;display:flex;flex-wrap:wrap;gap:7px;justify-content:center}
+.tile{min-height:44px;padding:6px 11px;border-radius:8px;border:1px solid var(--line);background:var(--tile);color:var(--ink);font:14px ui-monospace,Menlo,Consolas,monospace}
+.cmd .tile{background:#26332c;color:#dfeee4;border-color:#3c4c43}
+.tile.fresh{animation:pop .2s ease-out}
+.end,.start{align-self:stretch;text-align:center;background:var(--them);border-radius:14px;padding:18px 14px;margin-top:8px}
+.end .big,.start .big{font-size:42px;line-height:1.2}.end h2,.start h1{margin:4px 0;font-size:1.35em}.end p,.start p{margin:6px 0 0;color:var(--mute)}
+.start{margin-block:auto}
+.start .big{animation:bob 2.4s ease-in-out infinite}
+@keyframes bob{50%{transform:translateY(-6px)}}
+#fx{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:5}
+#fx span{position:absolute;top:-40px;font-size:22px;animation:fall linear forwards}
+@keyframes fall{to{transform:translateY(110vh) rotate(540deg)}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span class="face" id="face"></span>
+    <div class="who"><b id="name"></b><small id="status"></small></div>
+    <span class="hearts" id="hearts" aria-live="polite"></span>
+    <button class="hbtn" id="snd" aria-label="sound"></button>
+    <button class="hbtn" id="lang"></button>
+  </header>
+  <div id="prog"></div>
+  <div id="chat" aria-live="polite"></div>
+  <div id="tray"></div>
+  <div id="fx"></div>
+</div>
+<script>
+const GAME_URL = "https://play.barrypekerman.com";
+
+/* Structure: no prose here, and nothing here changes between languages. */
+const seq=l=>l.join(" ");
+/* The joke of every round: the bot's advice is right, and it still fails, because a person has to carry it out.
+   Rules: the answer can be worked out from what is on the screen, with no Linux knowledge;
+   and each round is something real players did on level 0 (command log, 2026-11-14). */
+const ROUNDS=[
+  { id:"mail", type:"pick", lose:"tab",
+    shot:{lines:["Dave left you a note. Type: mail","level0@handover:~$ read -mail","-bash: read: -m: invalid option"]},
+    options:[{id:"nodash"},{id:"click"},{id:"right",right:true}] },
+  { id:"talk", type:"pick", lose:"tab",
+    shot:{lines:["level0@handover:~$ so what?","so: command not found","level0@handover:~$ here i tried a command","here: command not found"]},
+    options:[{id:"polite"},{id:"right",right:true},{id:"reboot"}] },
+  { id:"skip", type:"line", lose:"dave", at:[0,1], wrong:{2:"did",3:"did"},
+    shot:{tap:[0,1,2,3],cap:"mail",lines:["level1's password is in your home directory.","Find it, then:","  ssh -p 2222 level1@localhost",
+      "  (or just: go 1 - I'm not a monster)"]} },
+  { id:"kbd", type:"pick", lose:"recipe", only:"he",
+    shot:{photo:true,cap:"IMG_4470.jpg",lines:["level0@handover:~$ ךד -ך","ךד: command not found"]},
+    options:[{id:"slow"},{id:"install"},{id:"right",right:true}] },
+  { id:"typo", type:"line", lose:"recipe", at:[2], wrong:{0:"fine",1:"fine",3:"error"},
+    shot:{photo:true,tap:[0,1,2,3],cap:"IMG_4471.jpg",lines:["level0@handover:~$ ls","notes.txt  pass_for_level1",
+      "level0@handover:~$ cat pass_for_level11","cat: pass_for_level11: No such file or directory"]} },
+  { id:"prompt", type:"pick", lose:"better",
+    shot:{lines:["level0@handover:~$ cat pass_for_level1","n0t-the-real-passw0rd","level0@handover:~$ n0t-the-real-passw0rd",
+      "n0t-the-real-passw0rd: command not found"]},
+    options:[{id:"again"},{id:"sudo"},{id:"right",right:true}] },
+  { id:"ssh", type:"tiles", lose:"dave",
+    shot:{cap:"mail",lines:["Find it, then:","  ssh -p 2222 level1@localhost","  (or just: go 1 - I'm not a monster)"]},
+    tiles:["rm -f ./","level1@localhost","go 1","cat pass_for_level1 |","ssh","dave@localhost","-p 2222"],
+    judge:l=>{ const k=seq(l);
+      if(k==="ssh -p 2222 level1@localhost") return "right";
+      if(k==="go 1") return "go";
+      if(l.includes("rm -f ./")) return "rm";
+      if(l.includes("cat pass_for_level1 |")) return "pipe";
+      if(l.includes("dave@localhost")) return "dave";
+      if(l.includes("ssh")&&l.includes("level1@localhost")&&!l.includes("-p 2222")) return "refused";
+      return "nope"; } },
+  { id:"pw", type:"pick", lose:"man",
+    options:[{id:"restart"},{id:"right",right:true},{id:"keyboard"}] },
+];
+
+/* Words. Hebrew avoids gendering the player: infinitives, no imperatives.
+   stat = what real players did (totals only); aside = the office. Both show after the round is solved. */
+const TEXT={
+he:{ dir:"rtl", ui:{ name:"גל", title:"עדיין רלוונטי", status:["גמור","על סף פיצוץ","עצבני","מתחיל להתעצבן","קצת לחוץ","אופטימי"], won:"מסתדר לבד", waiting:"מחכה לבוט", other:"EN",
+    intro:"התפקיד שלך: בוט עזרה. גל קיבל בירושה את השרת של דייב, ודייב כבר על המטוס. המטרה: להישאר רלוונטי.",
+    how:"נוגעים בתשובות, בלי להקליד. שתי דקות. כל מה שגל עושה כאן, שחקן אמיתי עשה קודם.", start:"מתחילים ◀",
+    tileHint:"בונים את הפקודה מהחלקים", send:"שליחה",
+    full:"למשחק המלא (במחשב)", again:"עוד סיבוב", share:"שיתוף", copied:"הקישור הועתק", left:"הסבלנות שנשארה לגל:",
+    shareText:"הייתי בוט עזרה במשך שתי דקות. גל עדיין כועס." },
+  mail:{ ask:"קיבלתי את השרת של דייב. כתוב שהוא השאיר לי פתק. ניסיתי לקרוא אותו והמחשב צעק עליי.", curt:"פתק. המחשב צועק.",
+    stat:"📊 סיפור אמיתי: שחקן אחד הקליד `read -mail`. 17 שחקנים בכלל לא פתחו את הפתק.",
+    nodash:{ reply:"בלי המקף: `read mail`", result:"עכשיו הוא סתם תקוע ומחכה. גם אני." },
+    click:{ reply:"ללחוץ על הפתק", result:"אין על מה ללחוץ. הכול פה רק טקסט." },
+    right:{ reply:"להקליד בדיוק מה שכתוב אחרי \"Type:\". רק `mail`", result:"אה. הוא התכוון לזה מילולית. אוקיי, זה מכתב מדייב." } },
+  talk:{ ask:"קראתי את המכתב. שאלתי את השרת מה עושים עכשיו. הוא חצוף.", curt:"שאלתי אותו. הוא חצוף.",
+    stat:"📊 סיפור אמיתי: שחקנים הקלידו `so what?` ו-`here i tried a command`, מילה במילה. אצל תשעה שחקנים, הדבר הראשון שהוקלד היה מילה שהשרת לא הכיר.",
+    polite:{ reply:"לבקש יותר יפה", result:"אמרתי בבקשה. `please: command not found`." },
+    right:{ reply:"הוא מבין רק פקודות. שאלות שואלים אותי, לא אותו", result:"אז הוא לא יודע לדבר, והבוט לא יודע להקליד. צוות מנצח." },
+    reboot:{ reply:"הוא מקולקל. להפעיל מחדש: `reboot`", result:"הוא סירב. מזל." } },
+  skip:{ ask:"אז הרצתי `go 1`, כמו שכתוב במייל של דייב. הוא מבקש סיסמה. אין לי סיסמה.", curt:"`go 1` מבקש סיסמה. אין לי.",
+    hint:"נוגעים בשורה שגל דילג עליה",
+    stat:"📊 סיפור אמיתי: שחקנים קפצו מהמייל ישר ל-`go 1`, בלי סיסמה. אחד ניסה אחר כך להיכנס בתור דייב.",
+    right:{ result:"`Find it`. היה שם `Find it`. קפצתי ישר לסוף." },
+    did:{ result:"את השורה הזאת דווקא עשיתי. פעמיים." } },
+  kbd:{ ask:"הבוט אמר להקליד `ls -l` כדי לראות אילו קבצים יש לי. הקלדתי. הנה מה שיצא.", curt:"הקלדתי `ls -l`. הנה.",
+    stat:"📊 סיפור אמיתי: שחקן הקליד `ךד -ך`. זה `ls -l` במקלדת עברית.",
+    slow:{ reply:"שגיאת הקלדה. להקליד שוב, לאט", result:"הקלדתי לאט. `ךד -ך`. לאט לא עזר." },
+    install:{ reply:"`ls` לא מותקן בשרת הזה", result:"דנה אומרת שהוא מותקן בכל שרת מאז 1971." },
+    right:{ reply:"המקלדת בעברית. להעביר לאנגלית", result:"`Alt+Shift`. עכשיו הוא מראה שני קבצים: `notes.txt` ו-`pass_for_level1`. דנה אומרת שזה קורה לה כל שבוע." } },
+  typo:{ ask:"הבוט אמר ש-`cat pass_for_level1` מציג מה יש בקובץ. הקלדתי, והוא טוען שאין קובץ כזה. צילמתי את המסך.", curt:"אין קובץ כזה. הנה תמונה.",
+    hint:"נוגעים בשורה שבה גל טעה",
+    stat:"📊 סיפור אמיתי: שחקנים הקלידו גם `pass_for_level_1`, `passwords_for_level1` ו-`car`.",
+    aside:"💬 הבוס: מה קורה עם השרת של דייב?",
+    right:{ result:"`1` אחד יותר מדי. להגנתי, המקלדת הזאת קטנטנה." },
+    error:{ result:"זאת הודעת השגיאה. אני יודע לקרוא. איפה *אני* טעיתי?" },
+    fine:{ result:"השורה הזאת דווקא עבדה." } },
+  prompt:{ ask:"הוא הדפיס את הסיסמה! הדבקתי אותה ולחצתי Enter. `command not found`.", curt:"הדבקתי את הסיסמה. `command not found`.",
+    stat:"📊 סיפור אמיתי: שחקן אחד הדפיס את הסיסמה, ו-31 שניות אחר כך הקליד משהו שהשרת לא הכיר. הלוג מסתיר מה.",
+    again:{ reply:"להעתיק שוב, בזהירות, ולהדביק", result:"`command not found`. שוב. בזהירות." },
+    sudo:{ reply:"חסר `sudo` לפניה", result:"עכשיו הוא מבקש סיסמה כדי להריץ את הסיסמה שלי." },
+    right:{ reply:"זאת לא פקודה. היא מיועדת לכניסה ל-level1, כשיבקשו אותה", result:"אההה. אז היא שייכת למקום אחר." } },
+  ssh:{ ask:"אז איפה מכניסים אותה? השורה נמצאת במייל של דייב, אבל אני כבר לא סומך על ההקלדה שלי. אפשר להרכיב לי אותה?", curt:"איפה מכניסים סיסמה. מהר.",
+    right:{ result:"הוא מבקש סיסמה. סוף סוף יש איפה לשים אותה!" },
+    go:{ result:"ארבעה תווים והוא מבקש סיסמה. דייב באמת לא מפלצת." },
+    rm:{ result:"`rm`?! זה מוחק דברים. הוא סירב, תודה לאל. הבוט ניסה למחוק לי הכול?" },
+    pipe:{ result:"שפכתי את הסיסמה לתוך הפקודה השנייה. הוא ביקש סיסמה בכל זאת." },
+    dave:{ result:"החשבון של דייב רוצה את הסיסמה של דייב. מסתבר שזה כל המשחק." },
+    refused:{ result:"הדלת הלא נכונה. דייב כתב מספר פורט במייל. הבוט בכלל קרא אותו?" },
+    nope:{ result:"`command not found`. תודה, באמת." } },
+  pw:{ ask:"הוא ביקש סיסמה והמקלדת מתה. אני מקליד ושום דבר לא מופיע.", curt:"סיסמה. שום דבר לא מופיע.",
+    stat:"📊 סיפור אמיתי: 22 כניסות כושלות ל-level1. יותר מבכל שלב אחר.",
+    restart:{ reply:"לעשות ריסטארט למחשב", result:"עשיתי. אותו דבר. הלכו ארבע דקות." },
+    right:{ reply:"זה בכוונה. פשוט להקליד וללחוץ Enter", result:"נכנסתי!!! בלי נקודות, בלי כוכביות, כלום? מי תכנן את זה?" },
+    keyboard:{ reply:"לנסות מקלדת אחרת", result:"לקחתי את של דנה. אותו דבר. עכשיו גם דנה עצבנית." } },
+  end:{ win:{ say:"תודה. מפה אני מסתדר לבד. נראה לי שאני כבר לא צריך את הבוט.", big:"🫡", title:"עבודה מושלמת. אין בך יותר צורך.", body:"גל עבר בדיוק את הנקודה שבה רוב השחקנים האמיתיים ויתרו. במשחק המלא מחכים עוד 20 שלבים, במחשב." },
+    tab:{ say:"", big:"🚪", title:"הטאב נסגר.", body:"בלי להגיד שלום." },
+    recipe:{ say:"לא משנה. יש לך מתכון טוב לשקשוקה?", big:"🍳", title:"עדיין יש לך עבודה. רק לא זאת.", body:"מעכשיו הבוט מכין שקשוקות." },
+    man:{ say:"", big:"📖", title:"גל פתח man page.", body:"משם עוד אף אחד לא חזר." },
+    dave:{ say:"", big:"✈️", title:"גל שלח הודעה לדייב.", body:"דייב ענה מיפן, עם אימוג'י. זה עזר יותר מהבוט." },
+    better:{ say:"מצאתי בוט יותר טוב.", big:"👎", title:"לא רלוונטי.", body:"הצ'אט נמחק." } } },
+
+en:{ dir:"ltr", ui:{ name:"Gal", title:"Still Relevant", status:["done","on the edge","stressed","getting annoyed","a bit tense","hopeful"], won:"doing fine alone", waiting:"waiting for the bot", other:"עב",
+    intro:"Your job: help bot. Dave's server just landed on Gal, and Dave is already on a plane. Your mission: stay relevant.",
+    how:"Tap the answers, no typing. Two minutes. Everything Gal does here, a real player did first.", start:"▶ Start",
+    tileHint:"Build the command from the pieces", send:"Send",
+    full:"Play the full game (on a computer)", again:"Play again", share:"Share", copied:"Link copied", left:"Gal's patience left:",
+    shareText:"I was a help bot for two minutes. Gal is still angry." },
+  mail:{ ask:"I just got Dave's server. It says he left me a note. I tried to read it and the computer yelled at me.", curt:"Note. Computer yelling.",
+    stat:"📊 True story: one player typed `read -mail`. 17 never opened the note at all.",
+    nodash:{ reply:"Drop the dash: `read mail`", result:"Now it's just sitting there, waiting. So am I." },
+    click:{ reply:"Click on the note", result:"There's nothing to click. It's all just text." },
+    right:{ reply:"Type exactly what it says after \"Type:\". Just `mail`", result:"Oh. It meant that literally. OK, it's a letter from Dave." } },
+  talk:{ ask:"I read the letter. I asked the server what to do next. It's rude.", curt:"I asked it. It's rude.",
+    stat:"📊 True story: players typed `so what?` and `here i tried a command`, word for word. For nine players, the very first thing they typed was a word the server didn't know.",
+    polite:{ reply:"Ask it more politely", result:"I said please. `please: command not found`." },
+    right:{ reply:"It only understands commands. Questions go to me, not to it", result:"So it can't talk, and the bot can't type. Great team." },
+    reboot:{ reply:"It's broken. Restart it: `reboot`", result:"It said no. Lucky." } },
+  skip:{ ask:"So I did what Dave's mail says: `go 1`. It wants a password. I don't have a password.", curt:"`go 1` wants a password. Don't have one.",
+    hint:"Tap the line Gal skipped",
+    stat:"📊 True story: players went straight from the mail to `go 1`, with no password. One then tried to log in as Dave.",
+    right:{ result:"\"Find it.\" There was a \"find it\". I went straight to the end." },
+    did:{ result:"That's the line I did. Twice." } },
+  kbd:{ ask:"The bot said to type `ls -l` to see which files I have. I typed it. Look what came out.", curt:"Typed `ls -l`. Look.",
+    stat:"📊 True story: a player typed `ךד -ך`. That's `ls -l` on a Hebrew keyboard.",
+    slow:{ reply:"Typo. Type it again, slower", result:"I typed it slower. `ךד -ך`. Slower didn't help." },
+    install:{ reply:"`ls` isn't installed on this server", result:"Dana says it's been on every server since 1971." },
+    right:{ reply:"Your keyboard is set to Hebrew. Switch it to English", result:"`Alt+Shift`. Now it shows two files: `notes.txt` and `pass_for_level1`. Dana says this happens to her every week." } },
+  typo:{ ask:"The bot said `cat pass_for_level1` shows what's in the file. I typed it and it says there's no such file. Here's a photo of my screen.", curt:"No such file. Photo.",
+    hint:"Tap the line where Gal went wrong",
+    stat:"📊 True story: players also typed `pass_for_level_1`, `passwords_for_level1` and `car`.",
+    aside:"💬 Boss: why don't we have Dave's server yet?",
+    right:{ result:"One `1` too many. In my defense, this keyboard is tiny." },
+    error:{ result:"That's the error message. I can read. Where did *I* go wrong?" },
+    fine:{ result:"That line actually worked." } },
+  prompt:{ ask:"It printed the password! I pasted it in and pressed Enter. `command not found`.", curt:"Pasted the password. `command not found`.",
+    stat:"📊 True story: one player printed the password and, 31 seconds later, typed something the server didn't know. The log hides what.",
+    again:{ reply:"Copy it again, carefully, and paste", result:"`command not found`. Again. Carefully." },
+    sudo:{ reply:"It needs `sudo` in front", result:"Now it wants a password before it will run my password." },
+    right:{ reply:"It's not a command. It's for level1's login, when that asks for it", result:"Ohhh. So it belongs somewhere else." } },
+  ssh:{ ask:"So where does it go? The line is in Dave's mail, but I don't trust my typing anymore. Can you build it for me?", curt:"Where does the password go. Fast.",
+    right:{ result:"It's asking for a password. Finally, somewhere to put it!" },
+    go:{ result:"Four characters and it's asking for a password. Dave really isn't a monster." },
+    rm:{ result:"`rm`?! That deletes things. It refused, thank God. Did this bot just try to delete everything I have?" },
+    pipe:{ result:"I poured the password into the other command. It asked for a password anyway." },
+    dave:{ result:"Dave's account wants Dave's password. Apparently that's the whole game." },
+    refused:{ result:"Wrong door. Dave wrote a port number in the mail. Did the bot read the mail?" },
+    nope:{ result:"`command not found`. Not helpful." } },
+  pw:{ ask:"It's asking for a password and my keyboard died. I type and nothing appears.", curt:"Password. Nothing appears.",
+    stat:"📊 True story: 22 failed logins into level1. More than any other level.",
+    restart:{ reply:"Restart your computer", result:"Same thing. That took four minutes." },
+    right:{ reply:"That's on purpose. Just type it and press Enter", result:"I'M IN. No dots, no stars, nothing? Who designed this?" },
+    keyboard:{ reply:"Try another keyboard", result:"I took Dana's. Same thing. Now Dana's angry too." } },
+  end:{ win:{ say:"Thanks. I've got it from here. I don't think I need this bot anymore.", big:"🫡", title:"Perfect work. You are no longer needed.", body:"Gal just got past the point where most real players gave up. The full game has 20 more levels, on a computer." },
+    tab:{ say:"", big:"🚪", title:"The tab closed.", body:"No goodbye." },
+    recipe:{ say:"Never mind. Got a good shakshuka recipe?", big:"🍳", title:"You still have a job. Just not this one.", body:"You do shakshuka now." },
+    man:{ say:"", big:"📖", title:"The man page is open.", body:"Nobody has ever come back from there." },
+    dave:{ say:"", big:"✈️", title:"A message went to Dave.", body:"He answered from Japan. With an emoji. More helpful than this bot." },
+    better:{ say:"Found a better bot.", big:"👎", title:"Not relevant.", body:"This chat has been deleted." } } },
+};
+
+const FACES=["😶","😡","😠","😤","😐","🙂"];
+const MAX=5;
+/* The rounds of the game being played. A round marked only:"he" is left out of a game started in English
+   (the Hebrew-keyboard round shows Hebrew letters). Fixed at Start, so switching language mid-game keeps the list. */
+let RS=ROUNDS;
+function pickRounds(){ RS=ROUNDS.filter(r=>!r.only||r.only===S.lang); }
+const Q=new URLSearchParams(location.search);
+const FAST=Q.has("fast"), DELAY=FAST?0:650, PRESS=FAST?0:170;
+
+/* State holds only ids, so the toggle can redraw the whole chat in another language. */
+const S = { lang:pickLang(), started:false, picks:[], tray:[], typing:false, seen:0, lock:false, fresh:-1, patience:MAX, copied:false };
+
+function store(k,v){ try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v); }catch(e){ return null; } }
+function pickLang(){
+  const q=Q.get("lang");
+  if(q==="he"||q==="en") return q;
+  const s=store("tap-lang");
+  return s==="en"||s==="he"?s:"he";
+}
+const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const rich=s=>esc(s).replace(/`([^`]+)`/g,'<code dir="ltr">$1</code>').replace(/\*([^*`<]+)\*/g,"<b>$1</b>");
+const T=()=>TEXT[S.lang];
+function byId(i){ return document.getElementById(i); }
+
+function joinCmd(ts){ return ts.reduce((a,t)=>a+(a===""||a.endsWith("./")?"":" ")+t,""); }
+
+function verdict(r,p){
+  if(r.type==="pick"){ const o=r.options.find(x=>x.id===p.o); return { o:p.o, right:!!o.right }; }
+  if(r.type==="line") return r.at.includes(p.l)?{o:"right",right:true}:{o:(r.wrong&&r.wrong[p.l])||"wrong"};
+  const o=r.judge(p.list); return { o, right:o==="right"||o==="go" };
+}
+
+/* Replays the picks into everything the screen needs. */
+function replay(){
+  const out={ items:[], patience:MAX, i:0, tried:[], over:null, mistakes:0 };
+  const ask=()=>{ const r=RS[out.i]; out.items.push({k:"them",text:T()[r.id][out.patience<=2?"curt":"ask"]});
+    if(r.shot) out.items.push({k:"shot",r:out.i}); };
+  ask();
+  for(const p of S.picks){
+    const r=RS[out.i], v=verdict(r,p), t=T()[r.id];
+    out.items.push({k:"me",r:out.i,p});
+    out.items.push({k:"them",text:t[v.o].result,upset:!v.right,glad:v.right});
+    if(v.right){ out.tried=[];
+      if(t.stat) out.items.push({k:"aside",stat:true,text:t.stat});
+      if(t.aside) out.items.push({k:"aside",text:t.aside});
+      out.i++;
+      if(out.i===RS.length){ out.over="win"; break; }
+      ask();
+    }else{ out.tried.push(p.o??p.l); out.mistakes++; out.patience--;
+      if(out.patience===0){ out.over=r.lose; break; }
+    }
+  }
+  return out;
+}
+
+/* live: this is the round being played, so the shot's tap lines are buttons. */
+function shotHTML(idx,live,tried){
+  const s=RS[idx].shot; let h=`<div class="shot${s.photo?" photo":""}">`;
+  if(s.cap) h+=`<div class="cap">${esc(s.cap)}</div>`;
+  if(!s.tap||!live) return h+`<div class="plain">${esc(s.lines.join("\n"))}</div></div>`;
+  return h+s.lines.map((l,i)=>s.tap.includes(i)
+    ? `<button class="ln live" data-line="${i}" ${tried.includes(i)?"disabled":""}>${esc(l)}</button>`
+    : `<div class="plain">${esc(l)}</div>`).join("")+`</div>`;
+}
+
+function render(){
+  if(!S.started) pickRounds();
+  const t=T(), g=replay();
+  let items=g.items, over=g.over;
+  if(S.typing){ let n=items.length-1; while(items[n].k!=="me") n--; items=items.slice(0,n+1); over=null; }
+  document.documentElement.lang=S.lang; document.documentElement.dir=t.dir;
+  const won=over==="win";
+  S.patience=g.patience;
+  byId("name").textContent=t.ui.name;
+  byId("status").textContent=!S.started?t.ui.waiting:won?t.ui.won:t.ui.status[g.patience];
+  byId("face").textContent=won?"😌":FACES[g.patience];
+  byId("hearts").textContent="❤️".repeat(g.patience)+"🖤".repeat(MAX-g.patience);
+  byId("lang").textContent=t.ui.other;
+  byId("snd").textContent=A.on?"🔊":"🔇";
+  byId("prog").innerHTML=RS.map((r,n)=>`<i class="${n<g.i||won?"on":n===g.i&&S.started?"cur":""}"></i>`).join("");
+  if(!S.started){
+    byId("chat").innerHTML=`<div class="start"><div class="big">🤖</div><h1>${esc(t.ui.title)}</h1><p>${esc(t.ui.intro)}</p><p>${esc(t.ui.how)}</p></div>`;
+    byId("tray").innerHTML=`<button class="go" data-act="start">${esc(t.ui.start)}</button>`;
+    return;
+  }
+  let h=`<div class="note">${rich(t.ui.intro)}</div>`;
+  items.forEach((it,n)=>{
+    const fresh=n>=S.seen?" new":"";
+    if(it.k==="them") h+=`<div class="msg${it.upset?" upset":""}${it.glad?" glad":""}${fresh}">${rich(it.text)}</div>`;
+    if(it.k==="aside") h+=`<div class="aside${it.stat?" stat":""}${fresh}">${rich(it.text)}</div>`;
+    if(it.k==="shot") h+=shotHTML(it.r, it.r===g.i&&!over&&!S.typing, g.tried);
+    if(it.k==="me"){
+      const r=RS[it.r]; let body;
+      if(r.type==="pick") body=rich(t[r.id][it.p.o].reply);
+      else if(r.type==="line") body=`<code dir="ltr">${esc(r.shot.lines[it.p.l])}</code>`;
+      else body=`<code dir="ltr">${esc(joinCmd(it.p.list))}</code>`;
+      h+=`<div class="msg me${fresh}">${body}</div>`;
+    }
+  });
+  S.seen=items.length;
+  if(S.typing) h+=`<div class="msg dots"><i></i><i></i><i></i></div>`;
+  if(over){
+    const e=t.end[over];
+    if(e.say) h+=`<div class="msg${won?"":" upset"}">${rich(e.say)}</div>`;
+    h+=`<div class="end new" data-end="${over}"><div class="big">${e.big}</div><h2>${esc(e.title)}</h2><p>${esc(e.body)}</p>`+
+      (won?`<p>${esc(t.ui.left)} ${"❤️".repeat(g.patience)}</p>`:"")+`</div>`;
+  }
+  byId("chat").innerHTML=h;
+  byId("tray").innerHTML=S.typing?"":tray(g,over);
+  const c=byId("chat"); c.scrollTop=c.scrollHeight;
+}
+
+function tray(g,over){
+  const t=T();
+  if(over){
+    const full=`<a class="go link${over==="win"?"":" alt"}" href="${GAME_URL}">${esc(t.ui.full)}</a>`;
+    const again=`<button class="go${over==="win"?" alt":""}" data-act="again">${esc(t.ui.again)}</button>`;
+    const share=`<button class="go alt" data-act="share">${esc(S.copied?t.ui.copied:t.ui.share)}</button>`;
+    return over==="win" ? full+`<div class="row">${share}${again}</div>` : again+full+share;
+  }
+  const r=RS[g.i];
+  if(r.type==="pick") return r.options.map(o=>`<button class="opt" data-opt="${o.id}" ${g.tried.includes(o.id)?"disabled":""}>${rich(t[r.id][o.id].reply)}</button>`).join("");
+  if(r.type==="line") return `<div class="hint">${esc(t[r.id].hint)}</div>`;
+  const last=S.tray.length-1;
+  const placed=S.tray.map((x,i)=>`<button class="tile${i===last&&S.fresh===i?" fresh":""}" data-out="${i}">${esc(r.tiles[x])}</button>`).join("");
+  const free=r.tiles.map((x,i)=>S.tray.includes(i)?"":`<button class="tile" data-in="${i}">${esc(x)}</button>`).join("");
+  return `<div class="hint">${esc(t.ui.tileHint)}</div><div class="cmd">${placed}</div><div class="tiles">${free}</div>
+    <button class="go" data-act="send" ${S.tray.length?"":"disabled"}>${esc(t.ui.send)}</button>`;
+}
+
+/* ---- Sound: everything is synthesized, so the page stays one file. ---- */
+const A={ ctx:null, on:store("tap-sound")!=="off", playing:false, n:0, next:0, timer:0 };
+function audio(){
+  if(!A.ctx){
+    const C=window.AudioContext||window.webkitAudioContext; if(!C) return null;
+    const c=A.ctx=new C();
+    A.master=c.createGain(); A.master.gain.value=A.on?1:0; A.master.connect(c.destination);
+    A.fx=c.createGain(); A.fx.gain.value=.9; A.fx.connect(A.master);
+    A.mus=c.createGain(); A.mus.gain.value=.32; A.mus.connect(A.master);
+    const len=c.sampleRate*.4|0, buf=c.createBuffer(1,len,c.sampleRate), d=buf.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+    A.noise=buf;
+  }
+  if(A.ctx.state==="suspended"&&!document.hidden) A.ctx.resume();
+  return A.ctx;
+}
+function tone(f,t,d,o={}){
+  const c=A.ctx, osc=c.createOscillator(), g=c.createGain(), v=o.v??.2;
+  osc.type=o.type||"sine"; osc.frequency.setValueAtTime(f,t);
+  if(o.to) osc.frequency.exponentialRampToValueAtTime(o.to,t+d);
+  g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(v,t+.008); g.gain.exponentialRampToValueAtTime(.0001,t+d);
+  let node=osc;
+  if(o.cut){ const fl=c.createBiquadFilter(); fl.type="lowpass"; fl.frequency.value=o.cut; osc.connect(fl); node=fl; }
+  node.connect(g); g.connect(o.dest||A.fx); osc.start(t); osc.stop(t+d+.03);
+}
+function hiss(t,d,v,hp,dest){
+  const c=A.ctx, s=c.createBufferSource(), fl=c.createBiquadFilter(), g=c.createGain();
+  s.buffer=A.noise; fl.type="highpass"; fl.frequency.value=hp;
+  g.gain.setValueAtTime(v,t); g.gain.exponentialRampToValueAtTime(.0001,t+d);
+  s.connect(fl); fl.connect(g); g.connect(dest||A.fx); s.start(t); s.stop(t+d+.02);
+}
+/* play(notes): [[freq, start offset, length, options], ...] */
+function play(notes){ const c=audio(); if(!c||!A.on) return; const t=c.currentTime+.01; for(const [f,at,d,o] of notes) tone(f,t+at,d,o); }
+const sfx={
+  tap:()=>play([[620,0,.06,{type:"triangle",v:.22}]]),
+  tile:n=>play([[392*Math.pow(2,n/6),0,.09,{type:"triangle",v:.2}]]),
+  untile:()=>play([[330,0,.08,{type:"triangle",v:.16,to:220}]]),
+  send:()=>play([[520,0,.11,{v:.16,to:980}]]),
+  pop:()=>play([[880,0,.08,{v:.14,to:640}]]),
+  right:()=>play([[660,0,.12,{type:"triangle",v:.24}],[990,.1,.2,{type:"triangle",v:.24}]]),
+  wrong:()=>play([[190,0,.26,{type:"sawtooth",v:.2,to:110,cut:900}],[142,.02,.26,{type:"sawtooth",v:.14,to:90,cut:900}]]),
+  level:()=>play([[523,0,.12,{type:"triangle",v:.22}],[659,.1,.12,{type:"triangle",v:.22}],[784,.2,.12,{type:"triangle",v:.22}],[1047,.3,.3,{type:"triangle",v:.24}]]),
+  win:()=>play([523,659,784,1047,784,1047,1319].map((f,i)=>[f,i*.11,i===6?.6:.14,{type:"triangle",v:.24}])),
+  lose:()=>play([[392,0,.2,{type:"square",v:.1,cut:1400}],[330,.2,.2,{type:"square",v:.1,cut:1400}],[262,.4,.2,{type:"square",v:.1,cut:1400}],[196,.6,.6,{type:"square",v:.1,cut:1000}]]),
+};
+/* Music: a four-chord loop (Am F C G) in eighth notes. It speeds up as Gal loses patience. */
+const CHORDS=[[57,60,64],[53,57,60],[48,52,55],[55,59,62]];
+const ARPS=[[0,1,2,1,0,2,1,2],[2,1,0,1,3,2,1,0]];
+const hz=m=>440*Math.pow(2,(m-69)/12);
+const bpm=()=>[138,132,120,110,102,96][S.patience];
+function musicStep(t,n){
+  const s=n&7, bar=n>>3, ch=CHORDS[bar%4], beat=30/bpm(), m=A.mus;
+  if(s===0||s===3||s===6) tone(hz(ch[0]-12+(s===6?7:0)),t,beat*1.6,{type:"sawtooth",v:.22,cut:520,dest:m});
+  const a=ARPS[(bar>>2)%2][s];
+  tone(hz((a===3?ch[0]+12:ch[a])+12),t,beat*.9,{type:"square",v:.07,cut:1700,dest:m});
+  if(s===0||s===4) tone(170,t,.11,{v:.3,to:60,dest:m});
+  if(s&1) hiss(t,.03,.05,6500,m);
+  if(s===4) hiss(t,.07,.07,3000,m);
+}
+function tick(){ const c=A.ctx; if(!c||!A.playing||c.state!=="running") return;
+  if(A.next<c.currentTime) A.next=c.currentTime+.05;
+  while(A.next<c.currentTime+.14){ musicStep(A.next,A.n++); A.next+=30/bpm(); } }
+const music={
+  start(){ const c=audio(); if(!c) return; A.mus.gain.cancelScheduledValues(c.currentTime); A.mus.gain.setTargetAtTime(.32,c.currentTime,.05);
+    if(A.playing) return; A.playing=true; A.n=0; A.next=c.currentTime+.08; A.timer=setInterval(tick,40); },
+  stop(){ if(!A.playing) return; A.playing=false; clearInterval(A.timer); A.mus.gain.setTargetAtTime(.0001,A.ctx.currentTime,.08); },
+};
+document.addEventListener("visibilitychange",()=>{ if(!A.ctx) return; if(document.hidden) A.ctx.suspend(); else A.ctx.resume(); });
+
+/* ---- Touch effects ---- */
+function buzz(p){ if(A.on&&navigator.vibrate) try{ navigator.vibrate(p); }catch(e){} }
+const calm=matchMedia("(prefers-reduced-motion:reduce)").matches;
+function again(el,cls){ el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+function confetti(){
+  if(calm) return; const fx=byId("fx"), bits=["🎉","✨","💚","🫡","⭐"];
+  for(let i=0;i<34;i++){ const s=document.createElement("span"); s.textContent=bits[i%bits.length];
+    s.style.left=Math.random()*100+"%"; s.style.animationDuration=1.6+Math.random()*1.6+"s"; s.style.animationDelay=Math.random()*.5+"s"; fx.appendChild(s); }
+  setTimeout(()=>{ fx.innerHTML=""; },4200);
+}
+document.addEventListener("pointerdown",e=>{
+  const b=e.target.closest("button,a.go"); if(!b||b.disabled||calm) return;
+  const r=b.getBoundingClientRect(), s=document.createElement("span"); s.className="rip";
+  s.style.left=e.clientX-r.left+"px"; s.style.top=e.clientY-r.top+"px"; b.appendChild(s); setTimeout(()=>s.remove(),520);
+});
+
+/* What the player hears and feels when Gal's answer lands. */
+function react(a,b){
+  if(b.over==="win"){ music.stop(); sfx.win(); confetti(); buzz([30,50,30,50,90]); }
+  else if(b.over){ music.stop(); sfx.lose(); again(byId("app"),"bad"); buzz(220); }
+  else if(b.i>a.i){ sfx.right(); buzz(18); }
+  else if(b.mistakes>a.mistakes){ sfx.wrong(); again(byId("app"),"bad"); again(byId("hearts"),"hit"); buzz([50,40,50]); }
+  else sfx.pop();
+}
+function answer(p){
+  const a=replay(); S.picks.push(p); S.tray=[]; S.fresh=-1; S.typing=true; const b=replay();
+  sfx.send(); render();
+  setTimeout(()=>{ S.typing=false; render(); react(a,b); }, DELAY);
+}
+/* Shows the press for a moment before the answer goes out. */
+function choose(b,p){ S.lock=true; b.classList.add("chosen"); sfx.tap(); setTimeout(()=>{ S.lock=false; answer(p); },PRESS); }
+
+function share(){
+  const t=T(), url=/^https?:/.test(location.protocol)?location.origin+location.pathname:GAME_URL;
+  const done=()=>{ S.copied=true; render(); setTimeout(()=>{ S.copied=false; render(); },1800); };
+  if(navigator.share) navigator.share({title:t.ui.title,text:t.ui.shareText,url}).catch(()=>{});
+  else if(navigator.clipboard) navigator.clipboard.writeText(url).then(done,()=>{});
+}
+
+document.addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b||b.disabled||S.lock) return;
+  audio();
+  if(b.id==="lang"){ S.lang=S.lang==="he"?"en":"he"; store("tap-lang",S.lang); sfx.tap(); render(); return; }
+  if(b.id==="snd"){ A.on=!A.on; store("tap-sound",A.on?"on":"off"); if(A.master) A.master.gain.value=A.on?1:0; sfx.tap(); render(); return; }
+  const d=b.dataset;
+  if(d.act==="start"){ S.started=true; S.seen=0; sfx.level(); music.start(); return render(); }
+  if(d.opt) return choose(b,{o:d.opt});
+  if(d.line) return choose(b,{l:+d.line});
+  if(d.in){ S.tray.push(+d.in); S.fresh=S.tray.length-1; sfx.tile(S.tray.length); return render(); }
+  if(d.out){ S.tray.splice(+d.out,1); S.fresh=-1; sfx.untile(); return render(); }
+  if(d.act==="send"){ const r=RS[replay().i]; return answer({list:S.tray.map(i=>r.tiles[i])}); }
+  if(d.act==="again"){ pickRounds(); S.picks=[]; S.tray=[]; S.seen=0; sfx.level(); music.start(); return render(); }
+  if(d.act==="share") return share();
+});
+
+/* Fails loudly if a line exists in one language and not the other. */
+function missingKeys(){
+  const keys=(o,pre="")=>Object.entries(o).flatMap(([k,v])=>v&&typeof v==="object"&&!Array.isArray(v)?keys(v,pre+k+"."):[pre+k]);
+  const a=new Set(keys(TEXT.he)),b=new Set(keys(TEXT.en));
+  return [...a].filter(k=>!b.has(k)).concat([...b].filter(k=>!a.has(k)));
+}
+window.__missing=missingKeys;
+window.__game=()=>{ const g=replay(); return { i:g.i, patience:g.patience, over:g.over, mistakes:g.mistakes }; };
+render();
+</script>
+</body>
+</html>

@@ -13,6 +13,7 @@ Routes:
   GET  /save/<sid>       passwords of the levels reached, for the browser's save
   GET  /leaderboard      finishers by summed solve time
   GET  /story            the premise and how to play (kept off the front page)
+  GET  /tap              the phone tap game (static, no box, no bot check)
   GET  /login /auth/callback /logout   optional GitHub sign-in
   GET  /healthz          {"players": N, "max": M}
 
@@ -78,7 +79,7 @@ from progress import (  # noqa: F401  (parse_save/solve_time/skipped_levels/save
     parse_commands, parse_save, save_progress, skipped_levels, solve_time,
 )
 from pages import (
-    APP, LANDING, LEADERBOARD, SAVE_JS, SLOWDOWN, SPAWNING, STATIC_DIR, STORY, TS_FAIL,
+    APP, LANDING, LEADERBOARD, SAVE_JS, SLOWDOWN, SPAWNING, STATIC_DIR, STORY, TAP, TS_FAIL,
 )
 
 
@@ -696,6 +697,11 @@ async def h_story(request):
     return web.Response(text=STORY, content_type="text/html")
 
 
+async def h_tap(request):
+    """The phone tap game: a static page. It starts no box and records nothing."""
+    return web.Response(text=headers.nonced(request, TAP), content_type="text/html")
+
+
 async def h_leaderboard(request):
     rows = []
     try:
@@ -818,6 +824,7 @@ def make_app():
         web.get("/save/{sid}", h_save),
         web.get("/leaderboard", h_leaderboard),
         web.get("/story", h_story),
+        web.get("/tap", h_tap),
         web.get("/login", h_login),
         web.get("/auth/callback", h_callback),
         web.get("/logout", h_logout),

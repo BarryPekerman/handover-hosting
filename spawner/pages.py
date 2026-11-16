@@ -32,6 +32,10 @@ LEADERBOARD = page("leaderboard.html")
 SPAWNING = page("spawning.html")
 SAVE_JS = page("save.js")
 APP = page("app.html")
+# The phone tap game "Still Relevant": one self-contained page, kept the same as
+# index.html in the handover-tap repo (copy it over to update). Its one inline
+# script gets the nonce marker here, so the file needs no edits.
+TAP = read_page("tap.html").replace("<script>", '<script nonce="__NONCE__">')
 
 
 def message_page(title: str, heading: str, body: str, color: str) -> str:
