@@ -78,6 +78,7 @@
 !spawner/pages/share.html
 !spawner/pages/spawning.html
 !spawner/pages/story.html
+!spawner/pages/tap.html
 !spawner/static/favicon.png
 !spawner/static/og.png
 !tests/README.md

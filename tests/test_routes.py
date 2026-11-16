@@ -347,7 +347,7 @@ def csp(h):
 
 
 def test_pages_send_the_main_sites_security_headers():
-    for path in ("/", "/story", "/leaderboard", "/healthz", "/play"):
+    for path in ("/", "/story", "/tap", "/leaderboard", "/healthz", "/play"):
         h = call("GET", path)[1]
         assert h["Strict-Transport-Security"] == "max-age=31536000", path
         assert h["X-Content-Type-Options"] == "nosniff", path
@@ -362,7 +362,7 @@ def test_pages_send_the_main_sites_security_headers():
 def test_every_script_on_a_page_carries_that_responses_nonce(monkeypatch):
     monkeypatch.setattr(sp, "TS_SITEKEY", "1x00000000000000000000AA")   # Turnstile's script too
     live("s1")
-    for path, cookies in (("/", None), ("/app/s1", {common.COOKIE: "s1"})):
+    for path, cookies in (("/", None), ("/tap", None), ("/app/s1", {common.COOKIE: "s1"})):
         status, h, body, _ = call("GET", path, cookies=cookies)
         nonce = csp(h)["script-src"].split("'nonce-")[1].split("'")[0]
         assert status == 200 and body.count("<script") >= 1, path
@@ -401,3 +401,10 @@ def test_a_script_that_got_in_through_a_players_name_never_gets_the_nonce():
     status, h, body, _ = call("GET", "/leaderboard")
     nonce = csp(h)["script-src"].split("'nonce-")[1].split("'")[0]
     assert status == 200 and nonce not in body
+
+
+def test_the_tap_game_is_a_static_page_that_starts_no_box():
+    status, _, body, _ = call("GET", "/tap")
+    assert status == 200 and "<title>Still Relevant</title>" in body
+    assert "__NONCE__" not in body
+    assert not common.sessions and not common.states
