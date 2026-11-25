@@ -24,8 +24,9 @@
     isolated_profile:
       config:
         limits.cpu.allowance: 50%
-        # 60 players x 320 MiB = 18.75 GiB of the host's 23.4 GiB, so even
-        # every box at its limit can't run the host (no swap) out of memory.
+        # 15 players x 320 MiB = 4.7 GiB of the host's ~5.6 GiB (1 OCPU / 6 GB
+        # since 2026-11-26), so even every box at its limit can't run the host
+        # (no swap) out of memory; ~0.9 GiB is left for the host's own services.
         # A whole game played in one box peaks at 231 MiB even squeezed to
         # 256 MiB (measured 2026-10-20, scripts/footprint.sh).
         limits.memory: 320MiB
