@@ -20,7 +20,7 @@ PROFILE     = os.environ.get("PROFILE", "isolated")
 # at once: with security.idmap.isolated it can hand out a uid range outside
 # root's subuid range (the box fails to start) or one another box already has.
 LAUNCH_LOCK = os.environ.get("LAUNCH_LOCK", "/run/lock/handover-launch")
-MAX_PLAYERS = int(os.environ.get("MAX_PLAYERS", "60"))
+MAX_PLAYERS = int(os.environ.get("MAX_PLAYERS", "15"))
 # Standby boxes kept started so a player gets one at once instead of waiting
 # ~5 s per box queued ahead of them. 0 turns it off.
 WARM_SPARES = int(os.environ.get("WARM_SPARES", "0"))

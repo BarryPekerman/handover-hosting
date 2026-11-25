@@ -31,7 +31,7 @@ security headers), pages/ (the HTML).
 Config via env (all optional; secrets come from the EnvironmentFile):
   LISTEN_HOST=127.0.0.1  LISTEN_PORT=8080   PUBLIC_URL=https://play.barrypekerman.com
   BASE_IMAGE=handover    PROFILE=isolated   LOGIN_USER=level0
-  MAX_PLAYERS=60         IDLE_MIN=60        MAX_LIFETIME_MIN=1440
+  MAX_PLAYERS=15         IDLE_MIN=60        MAX_LIFETIME_MIN=1440
   WARM_SPARES=0          (standby boxes kept started; the unit sets 3)
   OUTDATED_IDLE_MIN=5    (idle boxes on a replaced image are recycled)
   RATE_MAX=5 RATE_WINDOW=600   (new boxes per client IP per window, seconds)

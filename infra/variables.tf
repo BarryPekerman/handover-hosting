@@ -62,12 +62,14 @@ variable "shape" {
   default = "VM.Standard.A1.Flex"
 }
 
+# Cut from 4 OCPU / 24 GB on 2026-11-26 (MAX_PLAYERS 60 -> 15) to free the
+# rest of the tenancy's A1 allowance for the sequel.
 variable "ocpus" {
   type    = number
-  default = 4
+  default = 1
 }
 
 variable "memory_gbs" {
   type    = number
-  default = 24
+  default = 6
 }

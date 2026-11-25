@@ -1,12 +1,12 @@
 """The static HTML the spawner serves.
 
 Each page is read from pages/ once at import and cached as a module constant,
-with __SHARE__, __ICON__ and __PUBLIC_URL__ filled in. The request handlers that
+with __SHARE__, __ICON__, __PUBLIC_URL__ and __MAX_PLAYERS__ filled in. The request handlers that
 send these live in spawner.py; this module is just their content.
 """
 import os
 
-from common import PUBLIC_URL
+from common import MAX_PLAYERS, PUBLIC_URL
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.environ.get("STATIC_DIR", os.path.join(HERE, "static"))
@@ -26,7 +26,7 @@ def page(name: str) -> str:
     return read_page(name).replace("__SHARE__", SHARE).replace("__ICON__", ICON)
 
 
-LANDING = page("landing.html")
+LANDING = page("landing.html").replace("__MAX_PLAYERS__", str(MAX_PLAYERS))
 STORY = page("story.html")
 LEADERBOARD = page("leaderboard.html")
 SPAWNING = page("spawning.html")
